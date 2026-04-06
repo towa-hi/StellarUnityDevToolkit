@@ -1,0 +1,22 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 921437704ed079e44880a1106a4a4907, type: 3}
+  m_Name: DefaultSettings
+  m_EditorClassIdentifier: 
+  accountSecretSeed: SCMPBJFFWGZIK4MAAEAHPQ3PBWVZKBOZVMX5FPQ7J7LGCCAX6XKDCQ3T
+  contractAddress: CDV6YFS3SCXZSQ647VZGB5P6FIMTFRAY63JEUZIGQVN4QKERQJOT2ZEC
+  testnetUri: https://soroban-testnet.stellar.org
+  mainnetUri: 
+  testnetAssetIssuerAddress: GDGV7NUANMLOJ5P2KF3COS7AZZVFEAYG2UNSKCQFJM7K7IC7VL2MIKHR
+  mainnetAssetIssuerAddress: GAAFFCDB2UOOS7YHGL3M3YGTMKTQA35II64JKSGPEBXVZ5BRABDY65HH
+  testnetAssetCode: SCRY
+  mainnetAssetCode: SCRY

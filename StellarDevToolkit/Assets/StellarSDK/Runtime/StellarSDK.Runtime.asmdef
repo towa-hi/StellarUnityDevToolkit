@@ -1,0 +1,25 @@
+{
+    "name": "StellarSDK.Runtime",
+    "rootNamespace": "StellarSDK",
+    "references": [],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": true,
+    "precompiledReferences": [
+        "Newtonsoft.Json.dll",
+        "dotnetstandard-bip32.dll",
+        "dotnetstandard-bip39.dll",
+        "System.ComponentModel.Annotations.dll"
+    ],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [
+        {
+            "name": "com.unity.modules.jsonserialize",
+            "expression": "",
+            "define": "UNITY"
+        }
+    ],
+    "noEngineReferences": false
+}

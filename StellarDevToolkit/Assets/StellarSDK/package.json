@@ -1,0 +1,13 @@
+{
+  "name": "com.scryingstone.stellar-sdk",
+  "version": "0.1.0",
+  "displayName": "Stellar Unity SDK",
+  "description": "Interface with Stellar smart contracts from Unity",
+  "unity": "2022.3",
+  "dependencies": {
+    "com.unity.nuget.newtonsoft-json": "3.2.2"
+  },
+  "author": {
+    "name": "Scrying Stone"
+  }
+}
