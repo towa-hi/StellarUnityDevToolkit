@@ -252,16 +252,22 @@ namespace StellarSDK
         static async Task<Result<string>> SignAndEncodeTransaction(NetworkContext context, Transaction transaction, StellarClientTask task = null)
         {
             using var _ = new StellarClientTask.Scope(task, "SignAndEncodeTransaction");
-            if (context.isWallet)
+            if (context.signingMethod == NetworkContext.SigningMethod.UnityWallet)
             {
-                Result<string> signTransactionRes = await WalletManager.SignTransaction(EncodeTransaction(transaction), Network.Current.NetworkPassphrase);
+                if (context.unityWalletSigner == null)
+                {
+                    return Result<string>.Err(StatusCode.WALLET_NOT_AVAILABLE, "Unity wallet signing is selected, but no wallet signer is registered.");
+                }
+
+                Result<string> signTransactionRes = await context.unityWalletSigner(EncodeTransaction(transaction), Network.Current.NetworkPassphrase);
                 if (signTransactionRes.IsError)
                 {
                     return Result<string>.Err(signTransactionRes);
                 }
                 return Result<string>.Ok(signTransactionRes.Value);
             }
-            else
+
+            if (context.signingMethod == NetworkContext.SigningMethod.PrivateKey)
             {
                 DecoratedSignature signature = transaction.Sign(context.userAccount);
                 TransactionEnvelope.EnvelopeTypeTx envelope = new()
@@ -274,6 +280,8 @@ namespace StellarSDK
                 };
                 return Result<string>.Ok(TransactionEnvelopeXdr.EncodeToBase64(envelope));
             }
+
+            return Result<string>.Err(StatusCode.WALLET_ERROR, $"Unsupported signing method: {context.signingMethod}");
         }
 
         static async Task<Result<GetTransactionResult>> WaitForGetTransactionResult(NetworkContext context, string txHash, int delayMS, StellarClientTask task = null)

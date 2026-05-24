@@ -1,3 +1,5 @@
+using System;
+using System.Threading.Tasks;
 using Stellar;
 
 namespace StellarSDK
@@ -5,8 +7,14 @@ namespace StellarSDK
     [System.Serializable]
     public struct NetworkContext
     {
+        public enum SigningMethod
+        {
+            PrivateKey,
+            UnityWallet,
+        }
+
         public bool online;
-        public bool isWallet;
+        public SigningMethod signingMethod;
         public MuxedAccount userAccount;
         public bool isTestnet;
         public string contractAddress;
@@ -18,10 +26,13 @@ namespace StellarSDK
         public int pollRateMs;
         public int maxAttempts;
 
-        public NetworkContext(bool inOnline, bool inIsWallet, MuxedAccount inUserAccount, bool inIsTestnet, string inServerUri, string inContractAddress, string inAssetIssuerAddress, string inAssetCode, int inPollRateMs, int inMaxAttempts)
+        [NonSerialized]
+        public Func<string, string, Task<Result<string>>> unityWalletSigner;
+
+        public NetworkContext(bool inOnline, SigningMethod inSigningMethod, MuxedAccount inUserAccount, bool inIsTestnet, string inServerUri, string inContractAddress, string inAssetIssuerAddress, string inAssetCode, int inPollRateMs, int inMaxAttempts, Func<string, string, Task<Result<string>>> inUnityWalletSigner = null)
         {
             online = inOnline;
-            isWallet = inIsWallet;
+            signingMethod = inSigningMethod;
             userAccount = inUserAccount;
             isTestnet = inIsTestnet;
             serverUri = inServerUri;
@@ -30,6 +41,7 @@ namespace StellarSDK
             assetCode = inAssetCode;
             pollRateMs = inPollRateMs;
             maxAttempts = inMaxAttempts;
+            unityWalletSigner = inUnityWalletSigner;
         }
     }
 }

@@ -48,7 +48,7 @@ public class NetworkContextWindow : MonoBehaviour
     {
         Debug.Log("Populating network context: " + networkContext.serverUri);
         serverUriInputField.text = networkContext.serverUri;
-        privateKeyInputField.text = networkContext.userAccount.SecretSeed;
+        privateKeyInputField.text = networkContext.userAccount.SecretSeed ?? string.Empty;
         publicAddressInputField.text = networkContext.userAccount.AccountId;
         contractAddressInputField.text = networkContext.contractAddress;
         assetIssuerAddressInputField.text = networkContext.assetIssuerAddress;
@@ -61,7 +61,11 @@ public class NetworkContextWindow : MonoBehaviour
         originalAssetIssuerAddress = assetIssuerAddressInputField.text;
         originalAssetCode = assetCodeInputField.text;
 
-        OnPrivateKeyChanged();
+        if (networkContext.signingMethod == NetworkContext.SigningMethod.PrivateKey)
+        {
+            OnPrivateKeyChanged();
+        }
+
         saveButton.interactable = false;
     }
 
@@ -111,7 +115,7 @@ public class NetworkContextWindow : MonoBehaviour
     public void SaveNetworkContext()
     {
         NetworkContext newNetworkContext = new NetworkContext(
-            true, false, MuxedAccount.FromSecretSeed(privateKeyInputField.text), true,
+            true, NetworkContext.SigningMethod.PrivateKey, MuxedAccount.FromSecretSeed(privateKeyInputField.text), true,
             serverUriInputField.text,
             contractAddressInputField.text,
             assetIssuerAddressInputField.text,

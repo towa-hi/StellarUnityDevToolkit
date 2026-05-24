@@ -1,0 +1,13 @@
+{
+  "name": "com.scryingstone.stellar-wallet",
+  "version": "0.1.0",
+  "displayName": "Stellar Unity Wallet",
+  "description": "Freighter wallet integration for Unity WebGL",
+  "unity": "2022.3",
+  "dependencies": {
+    "com.unity.nuget.newtonsoft-json": "3.2.2"
+  },
+  "author": {
+    "name": "Scrying Stone"
+  }
+}

@@ -77,10 +77,10 @@ mergeInto(LibraryManager.library, {
     {
         try {
             const FreighterApi = window.freighterApi;
-            const unsignedTransactionXdr = UTF8ToString(unsignedTransactionEnvelope);
+            const unsignedEnvelope = UTF8ToString(unsignedTransactionEnvelope);
             const networkPassphrase = UTF8ToString(passphrase);
-            console.log(`JSSignTransaction: `, unsignedTransactionXdr);
-            const signTransactionRes = await FreighterApi.signTransaction(unsignedTransactionXdr, {networkPassphrase: networkPassphrase});
+            console.log(`JSSignTransaction: `, unsignedEnvelope);
+            const signTransactionRes = await FreighterApi.signTransaction(unsignedEnvelope, {networkPassphrase: networkPassphrase});
             console.log(`JSSignTransaction completed: `, signTransactionRes);
             if (signTransactionRes && signTransactionRes.error)
             {

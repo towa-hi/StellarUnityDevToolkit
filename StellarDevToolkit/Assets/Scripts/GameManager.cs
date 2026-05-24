@@ -1,6 +1,7 @@
 using UnityEngine;
 using Stellar;
 using StellarSDK;
+using StellarWallet;
 
 public class GameManager : MonoBehaviour
 {
@@ -39,7 +40,7 @@ public class GameManager : MonoBehaviour
         Network.UseTestNetwork();
         MuxedAccount account = MuxedAccount.FromSecretSeed(defaultSettings.accountSecretSeed);
         context = new NetworkContext(
-            true, false, account, true,
+            true, NetworkContext.SigningMethod.PrivateKey, account, true,
             defaultSettings.testnetUri,
             defaultSettings.contractAddress,
             defaultSettings.testnetAssetIssuerAddress,
@@ -60,6 +61,8 @@ public class GameManager : MonoBehaviour
         if (result.IsOk)
         {
             context.userAccount = result.Value;
+            context.signingMethod = NetworkContext.SigningMethod.PrivateKey;
+            context.unityWalletSigner = null;
             SetNetworkContext(context);
         }
         else
@@ -70,12 +73,52 @@ public class GameManager : MonoBehaviour
 
     public async void ConnectWallet()
     {
+        WalletResult<WalletManager.WalletConnection> result = await WalletManager.ConnectWallet(context.isTestnet);
+        if (result.IsError)
+        {
+            Debug.LogError($"ConnectWallet: error: {result.Message}");
+            return;
+        }
 
+        context.signingMethod = NetworkContext.SigningMethod.UnityWallet;
+        context.unityWalletSigner = SignWithUnityWallet;
+        context.userAccount = MuxedAccount.FromAccountId(result.Value.address);
+        if (!string.IsNullOrWhiteSpace(result.Value.networkDetails?.sorobanRpcUrl))
+        {
+            context.serverUri = result.Value.networkDetails.sorobanRpcUrl;
+        }
+
+        SetNetworkContext(context);
     }
 
     public void SetNetworkContext(NetworkContext networkContext)
     {
         context = networkContext;
         networkContextWindow.PopulateNetworkContext(context);
+    }
+
+    static async System.Threading.Tasks.Task<Result<string>> SignWithUnityWallet(string unsignedEnvelope, string networkPassphrase)
+    {
+        WalletResult<string> result = await WalletManager.SignTransaction(unsignedEnvelope, networkPassphrase);
+        if (result.IsOk)
+        {
+            return Result<string>.Ok(result.Value);
+        }
+
+        return Result<string>.Err(MapWalletStatusCode(result.Code), result.Message);
+    }
+
+    static StatusCode MapWalletStatusCode(WalletStatusCode code)
+    {
+        return code switch
+        {
+            WalletStatusCode.WalletNotAvailable => StatusCode.WALLET_NOT_AVAILABLE,
+            WalletStatusCode.WalletAddressMissing => StatusCode.WALLET_ADDRESS_MISSING,
+            WalletStatusCode.WalletNetworkDetailsError => StatusCode.WALLET_NETWORK_DETAILS_ERROR,
+            WalletStatusCode.WalletParsingError => StatusCode.WALLET_PARSING_ERROR,
+            WalletStatusCode.WalletSigningCancelled => StatusCode.WALLET_SIGNING_CANCELLED,
+            WalletStatusCode.WalletSigningError => StatusCode.WALLET_SIGNING_ERROR,
+            _ => StatusCode.WALLET_ERROR,
+        };
     }
 }

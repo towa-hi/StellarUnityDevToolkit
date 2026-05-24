@@ -5,8 +5,61 @@ using Newtonsoft.Json;
 using Newtonsoft.Json.Serialization;
 using UnityEngine;
 
-namespace StellarSDK
+namespace StellarWallet
 {
+    public enum WalletStatusCode
+    {
+        Success,
+        WalletNotAvailable,
+        WalletAddressMissing,
+        WalletNetworkDetailsError,
+        WalletParsingError,
+        WalletSigningError,
+        WalletSigningCancelled,
+    }
+
+    public readonly struct WalletResult<T>
+    {
+        public WalletStatusCode Code { get; }
+        public T Value { get; }
+        public string Message { get; }
+
+        public bool IsOk => Code == WalletStatusCode.Success;
+        public bool IsError => !IsOk;
+
+        WalletResult(WalletStatusCode code, T value, string message)
+        {
+            Code = code;
+            Value = value;
+            Message = message;
+        }
+
+        public static WalletResult<T> Ok(T value)
+        {
+            return new WalletResult<T>(WalletStatusCode.Success, value, null);
+        }
+
+        public static WalletResult<T> Err(WalletStatusCode code, string message = null)
+        {
+            if (code == WalletStatusCode.Success)
+            {
+                throw new ArgumentException("Err cannot be created with Success code");
+            }
+
+            return new WalletResult<T>(code, default, message);
+        }
+
+        public static WalletResult<T> Err<TOther>(WalletResult<TOther> errorResult)
+        {
+            if (errorResult.IsOk)
+            {
+                throw new ArgumentException("Error cannot be created with Ok code");
+            }
+
+            return new WalletResult<T>(errorResult.Code, default, errorResult.Message);
+        }
+    }
+
     public class WalletManager : MonoBehaviour
     {
         [DllImport("__Internal")]
@@ -52,9 +105,9 @@ namespace StellarSDK
         static TaskCompletionSource<JSResponse> getNetworkDetailsTaskSource;
         static TaskCompletionSource<JSResponse> signTransactionTaskSource;
 
-        static JsonSerializerSettings jsonSettings = new JsonSerializerSettings()
+        static readonly JsonSerializerSettings jsonSettings = new JsonSerializerSettings()
         {
-            ContractResolver = (IContractResolver)new CamelCasePropertyNamesContractResolver(),
+            ContractResolver = new CamelCasePropertyNamesContractResolver(),
             NullValueHandling = NullValueHandling.Ignore,
         };
 
@@ -75,33 +128,36 @@ namespace StellarSDK
             public NetworkDetails networkDetails;
         }
 
-        public static async Task<Result<WalletConnection>> ConnectWallet(bool isTestnet)
+        public static async Task<WalletResult<WalletConnection>> ConnectWallet(bool isTestnet)
         {
             SetWalletBusy(true);
-            Result<bool> check = await CheckWallet();
+            WalletResult<bool> check = await CheckWallet();
             address = null;
             networkDetails = null;
             if (check.IsError)
             {
                 Debug.LogWarning("Wallet could not be found");
                 SetWalletBusy(false);
-                return Result<WalletConnection>.Err(check);
+                return WalletResult<WalletConnection>.Err(check);
             }
-            Result<string> addrRes = await GetAddress(isTestnet);
+
+            WalletResult<string> addrRes = await GetAddress(isTestnet);
             if (addrRes.IsError)
             {
                 Debug.LogWarning("Address not found");
                 SetWalletBusy(false);
-                return Result<WalletConnection>.Err(addrRes);
+                return WalletResult<WalletConnection>.Err(addrRes);
             }
+
             address = addrRes.Value;
-            Result<string> ndRes = await GetNetworkDetails();
+            WalletResult<string> ndRes = await GetNetworkDetails();
             if (ndRes.IsError)
             {
                 Debug.LogWarning("Network details not found");
                 SetWalletBusy(false);
-                return Result<WalletConnection>.Err(ndRes);
+                return WalletResult<WalletConnection>.Err(ndRes);
             }
+
             string networkDetailsJson = ndRes.Value;
             try
             {
@@ -109,17 +165,21 @@ namespace StellarSDK
                 if (!string.IsNullOrEmpty(errorObj?.error))
                 {
                     Debug.LogError($"Network details error: {errorObj.error}");
-                    return Result<WalletConnection>.Err(StatusCode.WALLET_NETWORK_DETAILS_ERROR, errorObj.error);
+                    SetWalletBusy(false);
+                    return WalletResult<WalletConnection>.Err(WalletStatusCode.WalletNetworkDetailsError, errorObj.error);
                 }
+
                 NetworkDetails networkDetailsObj = JsonConvert.DeserializeObject<NetworkDetails>(networkDetailsJson, jsonSettings);
                 if (networkDetailsObj == null)
                 {
                     Debug.LogError("Invalid network details format");
-                    return Result<WalletConnection>.Err(StatusCode.WALLET_PARSING_ERROR, "Invalid wallet network details format");
+                    SetWalletBusy(false);
+                    return WalletResult<WalletConnection>.Err(WalletStatusCode.WalletParsingError, "Invalid wallet network details format");
                 }
+
                 Debug.Log($"Connected to network: {networkDetailsObj.network}");
                 networkDetails = networkDetailsObj;
-                var ok = Result<WalletConnection>.Ok(new WalletConnection { address = address, networkDetails = networkDetailsObj });
+                var ok = WalletResult<WalletConnection>.Ok(new WalletConnection { address = address, networkDetails = networkDetailsObj });
                 SetWalletBusy(false);
                 return ok;
             }
@@ -127,7 +187,7 @@ namespace StellarSDK
             {
                 Debug.LogError($"Failed to parse network details: {ex.Message}");
                 SetWalletBusy(false);
-                return Result<WalletConnection>.Err(StatusCode.WALLET_PARSING_ERROR, ex.Message);
+                return WalletResult<WalletConnection>.Err(WalletStatusCode.WalletParsingError, ex.Message);
             }
         }
 
@@ -145,7 +205,7 @@ namespace StellarSDK
         {
             try
             {
-                Result<bool> check = await CheckWallet();
+                WalletResult<bool> check = await CheckWallet();
                 return check.IsOk;
             }
             catch (Exception ex)
@@ -162,12 +222,13 @@ namespace StellarSDK
             networkDetails = null;
         }
 
-        static async Task<Result<bool>> CheckWallet()
+        static async Task<WalletResult<bool>> CheckWallet()
         {
             if (checkWalletTaskSource != null && !checkWalletTaskSource.Task.IsCompleted)
             {
                 throw new Exception("CheckWallet() is already in progress");
             }
+
             checkWalletTaskSource = new TaskCompletionSource<JSResponse>();
             JSCheckWallet();
             JSResponse checkWalletRes = await checkWalletTaskSource.Task;
@@ -175,18 +236,20 @@ namespace StellarSDK
             if (checkWalletRes.code != 1)
             {
                 Debug.Log("CheckWallet() failed with code " + checkWalletRes.code);
-                return Result<bool>.Err(StatusCode.WALLET_NOT_AVAILABLE, "Wallet not available");
+                return WalletResult<bool>.Err(WalletStatusCode.WalletNotAvailable, "Wallet not available");
             }
+
             Debug.Log("CheckWallet() completed");
-            return Result<bool>.Ok(true);
+            return WalletResult<bool>.Ok(true);
         }
 
-        static async Task<Result<string>> GetAddress(bool isTestnet)
+        static async Task<WalletResult<string>> GetAddress(bool isTestnet)
         {
             if (getAddressTaskSource != null && !getAddressTaskSource.Task.IsCompleted)
             {
                 throw new Exception("GetAddressFromFreighter() is already in progress");
             }
+
             getAddressTaskSource = new TaskCompletionSource<JSResponse>();
             JSGetFreighterAddress(isTestnet ? "true" : "false");
             JSResponse getAddressRes = await getAddressTaskSource.Task;
@@ -194,23 +257,26 @@ namespace StellarSDK
             if (getAddressRes.code == -2)
             {
                 Debug.Log("GetAddress() failed with code " + getAddressRes.code + " data " + getAddressRes.data);
-                return Result<string>.Err(StatusCode.WALLET_ADDRESS_MISSING, getAddressRes.data);
+                return WalletResult<string>.Err(WalletStatusCode.WalletAddressMissing, getAddressRes.data);
             }
-            else if (getAddressRes.code != 1)
+
+            if (getAddressRes.code != 1)
             {
                 Debug.Log("GetAddress() failed with code " + getAddressRes.code + " data " + getAddressRes.data);
-                return Result<string>.Err(StatusCode.WALLET_ADDRESS_MISSING, getAddressRes.data);
+                return WalletResult<string>.Err(WalletStatusCode.WalletAddressMissing, getAddressRes.data);
             }
+
             Debug.Log($"GetAddress() completed with data {getAddressRes.data}");
-            return Result<string>.Ok(getAddressRes.data);
+            return WalletResult<string>.Ok(getAddressRes.data);
         }
 
-        static async Task<Result<string>> GetNetworkDetails()
+        static async Task<WalletResult<string>> GetNetworkDetails()
         {
             if (getNetworkDetailsTaskSource != null && !getNetworkDetailsTaskSource.Task.IsCompleted)
             {
                 throw new Exception("GetNetworkDetails() is already in progress");
             }
+
             getNetworkDetailsTaskSource = new TaskCompletionSource<JSResponse>();
             JSGetNetworkDetails();
             JSResponse getNetworkDetailsRes = await getNetworkDetailsTaskSource.Task;
@@ -218,25 +284,27 @@ namespace StellarSDK
             if (getNetworkDetailsRes.code != 1)
             {
                 Debug.Log("GetNetworkDetails() failed with code " + getNetworkDetailsRes.code);
-                return Result<string>.Err(StatusCode.WALLET_NETWORK_DETAILS_ERROR, "Wallet network details error");
+                return WalletResult<string>.Err(WalletStatusCode.WalletNetworkDetailsError, "Wallet network details error");
             }
+
             Debug.Log($"GetNetworkDetails() completed with data {getNetworkDetailsRes.data}");
-            return Result<string>.Ok(getNetworkDetailsRes.data);
+            return WalletResult<string>.Ok(getNetworkDetailsRes.data);
         }
 
-        public static async Task<Result<string>> SignTransaction(string unsignedTransactionEnvelope, string networkPassphrase)
+        public static async Task<WalletResult<string>> SignTransaction(string unsignedTransactionEnvelope, string networkPassphrase)
         {
             if (signTransactionTaskSource != null && !signTransactionTaskSource.Task.IsCompleted)
             {
                 throw new Exception("SignTransaction() is already in progress");
             }
+
             SetWalletBusy(true);
             signTransactionTaskSource = new TaskCompletionSource<JSResponse>();
             JSSignTransaction(unsignedTransactionEnvelope, networkPassphrase);
             JSResponse signTransactionRes = await signTransactionTaskSource.Task;
             signTransactionTaskSource = null;
 
-            Result<string> result;
+            WalletResult<string> result;
             if (signTransactionRes.code == JsSignTransactionUserRejectedCode)
             {
                 Debug.Log("SignTransaction() cancelled by user");
@@ -245,7 +313,8 @@ namespace StellarSDK
                 {
                     cancellationMessage = "User cancelled signing request.";
                 }
-                result = Result<string>.Err(StatusCode.WALLET_SIGNING_CANCELLED, cancellationMessage);
+
+                result = WalletResult<string>.Err(WalletStatusCode.WalletSigningCancelled, cancellationMessage);
             }
             else if (signTransactionRes.code != 1)
             {
@@ -254,12 +323,12 @@ namespace StellarSDK
                 string errorMessage = string.IsNullOrWhiteSpace(failureDetails)
                     ? "failed to sign transaction"
                     : $"failed to sign transaction {failureDetails}";
-                result = Result<string>.Err(StatusCode.WALLET_SIGNING_ERROR, errorMessage);
+                result = WalletResult<string>.Err(WalletStatusCode.WalletSigningError, errorMessage);
             }
             else
             {
                 Debug.Log($"SignTransaction() completed with data {signTransactionRes.data}");
-                result = Result<string>.Ok(signTransactionRes.data);
+                result = WalletResult<string>.Ok(signTransactionRes.data);
             }
 
             SetWalletBusy(false);
@@ -275,6 +344,7 @@ namespace StellarSDK
                 {
                     throw new Exception($"StellarResponse() got unspecified error: {response}");
                 }
+
                 TaskCompletionSource<JSResponse> task = response.function switch
                 {
                     "_JSCheckWallet" => checkWalletTaskSource,
@@ -287,6 +357,7 @@ namespace StellarSDK
                 {
                     throw new Exception($"StellarResponse() task was null: {response}");
                 }
+
                 task.SetResult(response);
             }
             catch (Exception e)
@@ -320,7 +391,7 @@ namespace StellarSDK
             }
             catch (JsonException)
             {
-                // Fall back to the raw data
+                // Fall back to the raw data.
             }
 
             return trimmed;
