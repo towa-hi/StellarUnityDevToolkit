@@ -17,6 +17,10 @@ public class GameManager : MonoBehaviour
 
     StellarClientTask clientTask;
 
+    public NetworkUI networkUI;
+    public Board board;
+    public BlockBlastGameController blockBlastGameController;
+
     void Awake()
     {
         if (Instance == null)
@@ -120,5 +124,24 @@ public class GameManager : MonoBehaviour
             WalletStatusCode.WalletSigningError => StatusCode.WALLET_SIGNING_ERROR,
             _ => StatusCode.WALLET_ERROR,
         };
+    }
+
+    public void StartGame()
+    {
+        networkUI.gameObject.SetActive(false);
+        NewGame();
+    }
+
+    void NewGame()
+    {
+        Debug.Log("Starting new game");
+        if (blockBlastGameController != null)
+        {
+            blockBlastGameController.StartNewGame();
+            return;
+        }
+
+        // Fallback keeps older scene setups functional.
+        board.InitializeBoard(new Vector2Int(BlockBlastConstants.BoardSize, BlockBlastConstants.BoardSize));
     }
 }
