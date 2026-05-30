@@ -105,4 +105,15 @@ public class Board : MonoBehaviour
 
         highlightedBoardCells.Clear();
     }
+
+    public bool TryGetCell(Vector2Int coord, out BoardCell boardCell)
+    {
+        if (boardCells.TryGetValue(coord, out boardCell) && boardCell != null)
+        {
+            return true;
+        }
+
+        boardCell = null;
+        return false;
+    }
 }

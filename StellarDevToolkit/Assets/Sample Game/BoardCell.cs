@@ -36,22 +36,14 @@ public class BoardCell : MonoBehaviour
         Coord = coord;
         IsOccupied = false;
         isPreviewHighlighted = false;
+        tile = null;
         ApplyBackgroundColor(idleBackgroundColor);
     }
 
-    public void SetOccupied(Tile tile)
-    {
-        IsOccupied = tile != null;
-        this.tile = tile;
-    }
-
-    public void SetOccupied(bool occupied)
+    public void SetOccupiedState(bool occupied, Tile occupiedTile = null)
     {
         IsOccupied = occupied;
-        if (!occupied)
-        {
-            tile = null;
-        }
+        tile = occupied ? occupiedTile : null;
     }
 
     public void SetPreviewHighlight(bool highlighted)

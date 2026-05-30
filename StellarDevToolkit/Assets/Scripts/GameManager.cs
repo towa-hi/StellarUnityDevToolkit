@@ -1,4 +1,6 @@
 using UnityEngine;
+using System;
+using System.Threading.Tasks;
 using Stellar;
 using StellarSDK;
 using StellarWallet;
@@ -26,21 +28,79 @@ public class GameManager : MonoBehaviour
         if (Instance == null)
         {
             Instance = this;
+            return;
+        }
+
+        if (Instance != this)
+        {
+            Destroy(gameObject);
         }
     }
 
     void OnEnable()
     {
-        clientTask = new StellarClientTask();
-        clientTask.OnStepStarted += step => Debug.Log($"[StellarClient] Started: {step}");
-        clientTask.OnStepEnded += step => Debug.Log($"[StellarClient] Ended: {step}");
-        clientTask.OnBusyChanged += busy => Debug.Log($"[StellarClient] Busy: {busy}");
+        if (clientTask == null)
+        {
+            clientTask = new StellarClientTask();
+        }
+
+        clientTask.OnStepStarted += HandleClientStepStarted;
+        clientTask.OnStepEnded += HandleClientStepEnded;
+        clientTask.OnBusyChanged += HandleClientBusyChanged;
         if (communicationDiagram != null)
+        {
             communicationDiagram.SetTask(clientTask);
+        }
+    }
+
+    void OnDisable()
+    {
+        if (clientTask == null)
+        {
+            return;
+        }
+
+        clientTask.OnStepStarted -= HandleClientStepStarted;
+        clientTask.OnStepEnded -= HandleClientStepEnded;
+        clientTask.OnBusyChanged -= HandleClientBusyChanged;
     }
 
     async void Start()
     {
+        try
+        {
+            await InitializeDefaultNetworkContextAsync();
+        }
+        catch (Exception exception)
+        {
+            Debug.LogError($"GameManager.Start failed: {exception.Message}");
+        }
+    }
+
+    void HandleClientStepStarted(string step)
+    {
+        Debug.Log($"[StellarClient] Started: {step}");
+    }
+
+    void HandleClientStepEnded(string step)
+    {
+        Debug.Log($"[StellarClient] Ended: {step}");
+    }
+
+    void HandleClientBusyChanged(bool busy)
+    {
+        Debug.Log($"[StellarClient] Busy: {busy}");
+    }
+
+    async Task InitializeDefaultNetworkContextAsync()
+    {
+        if (defaultSettings == null)
+        {
+            Debug.LogError("GameManager: defaultSettings is missing.");
+            return;
+        }
+
+        await Task.Yield();
         Network.UseTestNetwork();
         MuxedAccount account = MuxedAccount.FromSecretSeed(defaultSettings.accountSecretSeed);
         context = new NetworkContext(
@@ -54,54 +114,93 @@ public class GameManager : MonoBehaviour
         SetNetworkContext(context);
     }
 
-    public async void RunTests()
+    public void RunTests()
     {
-        RpcTests.Results results = await RpcTests.RunAllAsync(context, clientTask);
+        _ = RunTestsAsync();
     }
 
-    public async void CreateTestnetAccount()
+    async Task RunTestsAsync()
     {
-        Result<MuxedAccount> result = await StellarClient.CreateAccount(clientTask);
-        if (result.IsOk)
+        try
         {
-            context.userAccount = result.Value;
-            context.signingMethod = NetworkContext.SigningMethod.PrivateKey;
-            context.unityWalletSigner = null;
+            await RpcTests.RunAllAsync(context, clientTask);
+        }
+        catch (Exception exception)
+        {
+            Debug.LogError($"RunTests failed: {exception.Message}");
+        }
+    }
+
+    public void CreateTestnetAccount()
+    {
+        _ = CreateTestnetAccountAsync();
+    }
+
+    async Task CreateTestnetAccountAsync()
+    {
+        try
+        {
+            Result<MuxedAccount> result = await StellarClient.CreateAccount(clientTask);
+            if (result.IsOk)
+            {
+                context.userAccount = result.Value;
+                context.signingMethod = NetworkContext.SigningMethod.PrivateKey;
+                context.unityWalletSigner = null;
+                SetNetworkContext(context);
+            }
+            else
+            {
+                Debug.LogError($"CreateTestnetAccount: error: {result.Message}");
+            }
+        }
+        catch (Exception exception)
+        {
+            Debug.LogError($"CreateTestnetAccount failed: {exception.Message}");
+        }
+    }
+
+    public void ConnectWallet()
+    {
+        _ = ConnectWalletAsync();
+    }
+
+    async Task ConnectWalletAsync()
+    {
+        try
+        {
+            WalletResult<WalletManager.WalletConnection> result = await WalletManager.ConnectWallet(context.isTestnet);
+            if (result.IsError)
+            {
+                Debug.LogError($"ConnectWallet: error: {result.Message}");
+                return;
+            }
+
+            context.signingMethod = NetworkContext.SigningMethod.UnityWallet;
+            context.unityWalletSigner = SignWithUnityWallet;
+            context.userAccount = MuxedAccount.FromAccountId(result.Value.address);
+            if (!string.IsNullOrWhiteSpace(result.Value.networkDetails?.sorobanRpcUrl))
+            {
+                context.serverUri = result.Value.networkDetails.sorobanRpcUrl;
+            }
+
             SetNetworkContext(context);
         }
-        else
+        catch (Exception exception)
         {
-            Debug.LogError($"CreateTestnetAccount: error: {result.Message}");
+            Debug.LogError($"ConnectWallet failed: {exception.Message}");
         }
-    }
-
-    public async void ConnectWallet()
-    {
-        WalletResult<WalletManager.WalletConnection> result = await WalletManager.ConnectWallet(context.isTestnet);
-        if (result.IsError)
-        {
-            Debug.LogError($"ConnectWallet: error: {result.Message}");
-            return;
-        }
-
-        context.signingMethod = NetworkContext.SigningMethod.UnityWallet;
-        context.unityWalletSigner = SignWithUnityWallet;
-        context.userAccount = MuxedAccount.FromAccountId(result.Value.address);
-        if (!string.IsNullOrWhiteSpace(result.Value.networkDetails?.sorobanRpcUrl))
-        {
-            context.serverUri = result.Value.networkDetails.sorobanRpcUrl;
-        }
-
-        SetNetworkContext(context);
     }
 
     public void SetNetworkContext(NetworkContext networkContext)
     {
         context = networkContext;
-        networkContextWindow.PopulateNetworkContext(context);
+        if (networkContextWindow != null)
+        {
+            networkContextWindow.PopulateNetworkContext(context);
+        }
     }
 
-    static async System.Threading.Tasks.Task<Result<string>> SignWithUnityWallet(string unsignedEnvelope, string networkPassphrase)
+    static async Task<Result<string>> SignWithUnityWallet(string unsignedEnvelope, string networkPassphrase)
     {
         WalletResult<string> result = await WalletManager.SignTransaction(unsignedEnvelope, networkPassphrase);
         if (result.IsOk)
@@ -142,6 +241,6 @@ public class GameManager : MonoBehaviour
         }
 
         // Fallback keeps older scene setups functional.
-        board.InitializeBoard(new Vector2Int(BlockBlastConstants.BoardSize, BlockBlastConstants.BoardSize));
+        board.InitializeBoard(GameUtility.GetBoardSize());
     }
 }

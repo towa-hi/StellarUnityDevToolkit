@@ -22,9 +22,12 @@ public class ShapeTray : MonoBehaviour
     public ShapeOfferSlot OwnerSlot { get; private set; }
 
     const int FootprintMask = (1 << ShapeDefinition.FootprintBitCount) - 1;
-    static readonly Vector2 GridCenterOffset = new Vector2((ShapeDefinition.GridSize - 1) * 0.5f, (ShapeDefinition.GridSize - 1) * 0.5f);
+    static readonly int BaseColorShaderId = Shader.PropertyToID("_BaseColor");
+    static readonly int ColorShaderId = Shader.PropertyToID("_Color");
     readonly Dictionary<Vector2Int, Tile> tilesByLocalCoord = new Dictionary<Vector2Int, Tile>();
     readonly List<Renderer> cachedRenderers = new List<Renderer>();
+    readonly Dictionary<Renderer, Color> rendererBaseColors = new Dictionary<Renderer, Color>();
+    MaterialPropertyBlock alphaPropertyBlock = null;
     Vector3 fullScale = Vector3.one;
 
     void Awake()
@@ -110,9 +113,7 @@ public class ShapeTray : MonoBehaviour
         foreach (Tile tile in tileComponents)
         {
             Vector3 localPos = transform.InverseTransformPoint(tile.transform.position);
-            Vector2Int localCoord = new Vector2Int(
-                Mathf.RoundToInt(localPos.x + GridCenterOffset.x),
-                Mathf.RoundToInt(localPos.y + GridCenterOffset.y));
+            Vector2Int localCoord = GameUtility.GetLocalShapeCoord(localPos);
             tilesByLocalCoord[localCoord] = tile;
         }
     }
@@ -126,6 +127,7 @@ public class ShapeTray : MonoBehaviour
 
         ClearExistingTiles();
         Dictionary<Vector2Int, TileData?> unpackedTilesByCoord = definition.UnpackToTileDictionary();
+        float centerOffset = GameUtility.GetShapeGridCenterOffset();
         foreach (KeyValuePair<Vector2Int, TileData?> entry in unpackedTilesByCoord)
         {
             if (!entry.Value.HasValue)
@@ -141,7 +143,7 @@ public class ShapeTray : MonoBehaviour
                 tile = tileObject.AddComponent<Tile>();
             }
 
-            tile.transform.localPosition = new Vector3(tileOffset.x - GridCenterOffset.x, tileOffset.y - GridCenterOffset.y, 0.0f);
+            tile.transform.localPosition = new Vector3(tileOffset.x - centerOffset, tileOffset.y - centerOffset, 0.0f);
             tile.transform.localRotation = Quaternion.identity;
             tile.transform.localScale = Vector3.one;
         }
@@ -155,6 +157,7 @@ public class ShapeTray : MonoBehaviour
     void CacheRenderers()
     {
         cachedRenderers.Clear();
+        rendererBaseColors.Clear();
         foreach (Tile tile in tilesByLocalCoord.Values)
         {
             if (tile == null)
@@ -166,6 +169,8 @@ public class ShapeTray : MonoBehaviour
             if (renderer != null)
             {
                 cachedRenderers.Add(renderer);
+                Material sharedMaterial = renderer.sharedMaterial;
+                rendererBaseColors[renderer] = sharedMaterial != null ? sharedMaterial.color : Color.white;
             }
         }
     }
@@ -187,6 +192,11 @@ public class ShapeTray : MonoBehaviour
     void SetAlpha(float alpha)
     {
         alpha = Mathf.Clamp01(alpha);
+        if (alphaPropertyBlock == null)
+        {
+            alphaPropertyBlock = new MaterialPropertyBlock();
+        }
+
         foreach (Renderer renderer in cachedRenderers)
         {
             if (renderer == null)
@@ -194,10 +204,12 @@ public class ShapeTray : MonoBehaviour
                 continue;
             }
 
-            Material material = renderer.material;
-            Color color = material.color;
+            Color color = rendererBaseColors.TryGetValue(renderer, out Color baseColor) ? baseColor : Color.white;
             color.a = alpha;
-            material.color = color;
+            renderer.GetPropertyBlock(alphaPropertyBlock);
+            alphaPropertyBlock.SetColor(BaseColorShaderId, color);
+            alphaPropertyBlock.SetColor(ColorShaderId, color);
+            renderer.SetPropertyBlock(alphaPropertyBlock);
         }
     }
 }

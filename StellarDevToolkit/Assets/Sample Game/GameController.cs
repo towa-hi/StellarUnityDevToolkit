@@ -3,17 +3,26 @@ using System.Collections.Generic;
 
 public class GameController : MonoBehaviour
 {
+    public enum GameState
+    {
+        WaitingForDrag,
+        DraggingShape,
+        ResolvingPlacement,
+        GameOver
+    }
+
     [SerializeField] Board board = null;
     [SerializeField] ShapeOfferArea offerArea = null;
     [SerializeField] InputController inputController = null;
     [SerializeField] Camera gameplayCamera = null;
     [SerializeField] float dragPlaneDepth = 0.0f;
 
-    public GameState State { get; private set; } = GameState.WaitingForDrag;
-    public int Score { get; private set; }
+    [SerializeField] public GameState State = GameState.WaitingForDrag;
+    public int Score = 0;
 
     ShapeTray draggedShape = null;
     ShapeOfferSlot draggedFromSlot = null;
+    readonly List<Vector2Int> previewCoordsBuffer = new List<Vector2Int>();
 
     void Awake()
     {
@@ -49,7 +58,7 @@ public class GameController : MonoBehaviour
         }
 
         CancelActiveDrag();
-        board.InitializeBoard(new Vector2Int(BlockBlastConstants.BoardSize, BlockBlastConstants.BoardSize));
+        board.InitializeBoard(GameUtility.GetBoardSize());
         if (offerArea != null)
         {
             offerArea.PopulateShapeOfferSlots();
@@ -162,7 +171,7 @@ public class GameController : MonoBehaviour
 
     public bool TryPlaceShape(ShapeDefinition shapeDefinition, Vector2Int anchorCoord, ShapeTray sourceShape = null)
     {
-        if (shapeDefinition == null)
+        if (shapeDefinition == null || board == null)
         {
             return false;
         }
@@ -174,17 +183,20 @@ public class GameController : MonoBehaviour
 
         foreach (Vector2Int offset in shapeDefinition.TileOffsets)
         {
-            Vector2Int targetCoord = anchorCoord + offset;
-            BoardCell targetCell = board.boardCells[targetCoord];
+            Vector2Int targetCoord = GameUtility.GetPlacementTargetCoord(anchorCoord, offset);
+            if (!board.TryGetCell(targetCoord, out BoardCell targetCell))
+            {
+                return false;
+            }
 
             if (sourceShape != null && sourceShape.TryGetTile(offset, out Tile tile) && tile != null)
             {
                 AttachTileToBoardCell(tile, targetCell);
-                targetCell.SetOccupied(tile);
+                targetCell.SetOccupiedState(true, tile);
             }
             else
             {
-                targetCell.SetOccupied(true);
+                targetCell.SetOccupiedState(true);
             }
         }
 
@@ -215,8 +227,7 @@ public class GameController : MonoBehaviour
             return false;
         }
 
-        int pivotOffset = ShapeDefinition.GridSize / 2;
-        anchorCoord = hoveredBoardCell.Coord - new Vector2Int(pivotOffset, pivotOffset);
+        anchorCoord = GameUtility.GetPlacementAnchorCoord(hoveredBoardCell.Coord);
         return true;
     }
 
@@ -249,20 +260,20 @@ public class GameController : MonoBehaviour
             return;
         }
 
-        List<Vector2Int> previewCoords = new List<Vector2Int>();
+        previewCoordsBuffer.Clear();
         foreach (Vector2Int offset in definition.TileOffsets)
         {
-            Vector2Int targetCoord = anchorCoord + offset;
-            if (!board.boardCells.ContainsKey(targetCoord))
+            Vector2Int targetCoord = GameUtility.GetPlacementTargetCoord(anchorCoord, offset);
+            if (!board.TryGetCell(targetCoord, out _))
             {
                 board.ClearPreviewHighlights();
                 return;
             }
 
-            previewCoords.Add(targetCoord);
+            previewCoordsBuffer.Add(targetCoord);
         }
 
-        board.SetPreviewHighlights(previewCoords);
+        board.SetPreviewHighlights(previewCoordsBuffer);
     }
 
     void HandlePointerInput()
@@ -343,15 +354,15 @@ public class GameController : MonoBehaviour
 
     bool CanPlaceShape(ShapeDefinition shapeDefinition, Vector2Int anchorCoord)
     {
-        if (board == null || board.boardCells == null || shapeDefinition == null)
+        if (board == null || shapeDefinition == null)
         {
             return false;
         }
 
         foreach (Vector2Int offset in shapeDefinition.TileOffsets)
         {
-            Vector2Int targetCoord = anchorCoord + offset;
-            if (!board.boardCells.TryGetValue(targetCoord, out BoardCell boardCell) || boardCell.IsOccupied)
+            Vector2Int targetCoord = GameUtility.GetPlacementTargetCoord(anchorCoord, offset);
+            if (!board.TryGetCell(targetCoord, out BoardCell boardCell) || boardCell.IsOccupied)
             {
                 return false;
             }
@@ -370,7 +381,7 @@ public class GameController : MonoBehaviour
             bool isFullRow = true;
             for (int x = 0; x < boardSize; x++)
             {
-                if (!board.boardCells.TryGetValue(new Vector2Int(x, y), out BoardCell cell) || !cell.IsOccupied)
+                if (!board.TryGetCell(new Vector2Int(x, y), out BoardCell cell) || !cell.IsOccupied)
                 {
                     isFullRow = false;
                     break;
@@ -391,7 +402,7 @@ public class GameController : MonoBehaviour
             bool isFullColumn = true;
             for (int y = 0; y < boardSize; y++)
             {
-                if (!board.boardCells.TryGetValue(new Vector2Int(x, y), out BoardCell cell) || !cell.IsOccupied)
+                if (!board.TryGetCell(new Vector2Int(x, y), out BoardCell cell) || !cell.IsOccupied)
                 {
                     isFullColumn = false;
                     break;
@@ -409,13 +420,13 @@ public class GameController : MonoBehaviour
 
         foreach (Vector2Int coord in cellsToClear)
         {
-            if (!board.boardCells.TryGetValue(coord, out BoardCell boardCell))
+            if (!board.TryGetCell(coord, out BoardCell boardCell))
             {
                 continue;
             }
 
             Tile occupiedTile = boardCell.OccupiedTile;
-            boardCell.SetOccupied(false);
+            boardCell.SetOccupiedState(false);
             if (occupiedTile != null)
             {
                 Destroy(occupiedTile.gameObject);
