@@ -4,6 +4,7 @@ public class BoardCell : MonoBehaviour
 {
     public Vector2Int Coord { get; private set; }
     public bool IsOccupied { get; private set; }
+    public Tile OccupiedTile => tile;
 
     [SerializeField] Tile tile = null;
     [SerializeField] GameObject background = null;

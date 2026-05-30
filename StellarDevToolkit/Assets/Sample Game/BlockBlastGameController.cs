@@ -17,7 +17,7 @@ public class BlockBlastGameController : MonoBehaviour
 
     ShapeTray draggedShape = null;
     ShapeOfferSlot draggedFromSlot = null;
-    BoardCell highlightedBoardCell = null;
+    readonly HashSet<BoardCell> highlightedBoardCells = new HashSet<BoardCell>();
     void Awake()
     {
         if (gameplayCamera == null)
@@ -71,7 +71,7 @@ public class BlockBlastGameController : MonoBehaviour
         State = state;
     }
 
-    public bool TryPlaceShape(ShapeDefinition shapeDefinition, Vector2Int anchorCoord)
+    public bool TryPlaceShape(ShapeDefinition shapeDefinition, Vector2Int anchorCoord, ShapeTray sourceShape = null)
     {
         if (shapeDefinition == null)
         {
@@ -86,7 +86,17 @@ public class BlockBlastGameController : MonoBehaviour
         foreach (Vector2Int offset in shapeDefinition.TileOffsets)
         {
             Vector2Int targetCoord = anchorCoord + offset;
-            board.boardCells[targetCoord].SetOccupied(true);
+            BoardCell targetCell = board.boardCells[targetCoord];
+
+            if (sourceShape != null && sourceShape.TryGetTile(offset, out Tile tile) && tile != null)
+            {
+                AttachTileToBoardCell(tile, targetCell);
+                targetCell.SetOccupied(tile);
+            }
+            else
+            {
+                targetCell.SetOccupied(true);
+            }
         }
 
         Score += shapeDefinition.TileOffsets.Count;
@@ -182,9 +192,9 @@ public class BlockBlastGameController : MonoBehaviour
         }
 
         bool placed = false;
-        if (TryGetBoardCoordUnderCursor(out Vector2Int boardCoord))
+        if (TryGetPlacementAnchorUnderCursor(out Vector2Int anchorCoord))
         {
-            placed = TryPlaceShape(draggedShape.Definition, boardCoord);
+            placed = TryPlaceShape(draggedShape.Definition, anchorCoord, draggedShape);
         }
 
         if (placed)
@@ -193,6 +203,7 @@ public class BlockBlastGameController : MonoBehaviour
             draggedFromSlot.Clear();
             CancelActiveDrag();
             Destroy(placedShape.gameObject);
+            PopulateShapeOfferSlotsIfEmpty();
             State = GameState.ResolvingPlacement;
             if (!CheckForGameOver())
             {
@@ -245,6 +256,21 @@ public class BlockBlastGameController : MonoBehaviour
         return false;
     }
 
+    bool TryGetPlacementAnchorUnderCursor(out Vector2Int anchorCoord)
+    {
+        if (!TryGetBoardCoordUnderCursor(out Vector2Int hoveredCoord))
+        {
+            anchorCoord = default;
+            return false;
+        }
+
+        // Shape tile offsets use a 5x5 local grid (0..4), while drag position is centered on that grid.
+        // Convert hovered board cell to the shape's local (0,0) anchor used by placement.
+        int pivotOffset = ShapeDefinition.GridSize / 2;
+        anchorCoord = hoveredCoord - new Vector2Int(pivotOffset, pivotOffset);
+        return true;
+    }
+
     void UpdateHoveredBoardCellPreview()
     {
         if (draggedShape == null)
@@ -253,39 +279,70 @@ public class BlockBlastGameController : MonoBehaviour
             return;
         }
 
-        BoardCell nextHoveredBoardCell = null;
-        Ray ray = gameplayCamera.ScreenPointToRay(Input.mousePosition);
-        if (Physics.Raycast(ray, out RaycastHit hitInfo, float.MaxValue, boardCellLayerMask))
+        ShapeDefinition definition = draggedShape.Definition;
+        if (definition == null || !TryGetPlacementAnchorUnderCursor(out Vector2Int anchorCoord) || !CanPlaceShape(definition, anchorCoord))
         {
-            nextHoveredBoardCell = hitInfo.collider.GetComponentInParent<BoardCell>();
+            ClearHoveredBoardCellPreview();
+            return;
         }
 
-        if (highlightedBoardCell == nextHoveredBoardCell)
+        HashSet<BoardCell> nextHighlightedBoardCells = new HashSet<BoardCell>();
+        foreach (Vector2Int offset in definition.TileOffsets)
+        {
+            Vector2Int targetCoord = anchorCoord + offset;
+            if (!board.boardCells.TryGetValue(targetCoord, out BoardCell boardCell))
+            {
+                ClearHoveredBoardCellPreview();
+                return;
+            }
+
+            nextHighlightedBoardCells.Add(boardCell);
+        }
+
+        bool isSamePreview =
+            nextHighlightedBoardCells.Count == highlightedBoardCells.Count &&
+            nextHighlightedBoardCells.IsSubsetOf(highlightedBoardCells);
+        if (isSamePreview)
         {
             return;
         }
 
-        if (highlightedBoardCell != null)
+        foreach (BoardCell boardCell in highlightedBoardCells)
         {
-            highlightedBoardCell.SetPreviewHighlight(false);
+            if (!nextHighlightedBoardCells.Contains(boardCell))
+            {
+                boardCell.SetPreviewHighlight(false);
+            }
         }
 
-        highlightedBoardCell = nextHoveredBoardCell;
-        if (highlightedBoardCell != null)
+        foreach (BoardCell boardCell in nextHighlightedBoardCells)
         {
-            highlightedBoardCell.SetPreviewHighlight(true);
+            if (!highlightedBoardCells.Contains(boardCell))
+            {
+                boardCell.SetPreviewHighlight(true);
+            }
         }
+
+        highlightedBoardCells.Clear();
+        highlightedBoardCells.UnionWith(nextHighlightedBoardCells);
     }
 
     void ClearHoveredBoardCellPreview()
     {
-        if (highlightedBoardCell == null)
+        if (highlightedBoardCells.Count == 0)
         {
             return;
         }
 
-        highlightedBoardCell.SetPreviewHighlight(false);
-        highlightedBoardCell = null;
+        foreach (BoardCell boardCell in highlightedBoardCells)
+        {
+            if (boardCell != null)
+            {
+                boardCell.SetPreviewHighlight(false);
+            }
+        }
+
+        highlightedBoardCells.Clear();
     }
 
     void ValidateSceneWiring()
@@ -335,13 +392,58 @@ public class BlockBlastGameController : MonoBehaviour
                 Destroy(slot.CurrentShape.gameObject);
                 slot.Clear();
             }
-
-            Transform slotAnchor = slot.GetSlotAnchor();
-            ShapeTray spawnedTray = Instantiate(shapeTrayPrefab, slotAnchor.position, slotAnchor.rotation);
-            int randomPackedShapeData = GenerateRandomPackedShapeData();
-            spawnedTray.InitializeFromPackedShapeData(randomPackedShapeData);
-            slot.SetShape(spawnedTray);
+            PopulateShapeOfferSlot(slot);
         }
+    }
+
+    void PopulateEmptyShapeOfferSlots()
+    {
+        if (shapeOfferArea == null || shapeTrayPrefab == null)
+        {
+            return;
+        }
+
+        foreach (ShapeOfferSlot slot in shapeOfferArea.OfferSlots)
+        {
+            if (slot == null || slot.HasShape())
+            {
+                continue;
+            }
+
+            PopulateShapeOfferSlot(slot);
+        }
+    }
+
+    void PopulateShapeOfferSlotsIfEmpty()
+    {
+        if (shapeOfferArea == null)
+        {
+            return;
+        }
+
+        foreach (ShapeOfferSlot slot in shapeOfferArea.OfferSlots)
+        {
+            if (slot != null && slot.HasShape())
+            {
+                return;
+            }
+        }
+
+        PopulateEmptyShapeOfferSlots();
+    }
+
+    void PopulateShapeOfferSlot(ShapeOfferSlot slot)
+    {
+        if (slot == null || shapeTrayPrefab == null)
+        {
+            return;
+        }
+
+        Transform slotAnchor = slot.GetSlotAnchor();
+        ShapeTray spawnedTray = Instantiate(shapeTrayPrefab, slotAnchor.position, slotAnchor.rotation);
+        int randomPackedShapeData = GenerateRandomPackedShapeData();
+        spawnedTray.InitializeFromPackedShapeData(randomPackedShapeData);
+        slot.SetShape(spawnedTray);
     }
 
     int GenerateRandomPackedShapeData()
@@ -424,7 +526,17 @@ public class BlockBlastGameController : MonoBehaviour
 
         foreach (Vector2Int coord in cellsToClear)
         {
-            board.boardCells[coord].SetOccupied(false);
+            if (!board.boardCells.TryGetValue(coord, out BoardCell boardCell))
+            {
+                continue;
+            }
+
+            Tile occupiedTile = boardCell.OccupiedTile;
+            boardCell.SetOccupied(false);
+            if (occupiedTile != null)
+            {
+                Destroy(occupiedTile.gameObject);
+            }
         }
 
         return cellsToClear.Count;
@@ -463,5 +575,18 @@ public class BlockBlastGameController : MonoBehaviour
         }
 
         return false;
+    }
+
+    void AttachTileToBoardCell(Tile tile, BoardCell boardCell)
+    {
+        if (tile == null || boardCell == null)
+        {
+            return;
+        }
+
+        tile.transform.SetParent(boardCell.transform, false);
+        tile.transform.localPosition = Vector3.zero;
+        tile.transform.localRotation = Quaternion.identity;
+        tile.transform.localScale = Vector3.one;
     }
 }

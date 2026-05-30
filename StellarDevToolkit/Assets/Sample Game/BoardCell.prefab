@@ -61,7 +61,7 @@ MonoBehaviour:
   tile: {fileID: 0}
   background: {fileID: 4277574067617380927}
   hitbox: {fileID: 2016204076957294640}
-  idleBackgroundColor: {r: 1, g: 1, b: 1, a: 1}
+  idleBackgroundColor: {r: 0.7075472, g: 0.7075472, b: 0.7075472, a: 1}
   hoverBackgroundColor: {r: 1, g: 0, b: 0, a: 1}
 --- !u!1 &4277574067617380927
 GameObject:
