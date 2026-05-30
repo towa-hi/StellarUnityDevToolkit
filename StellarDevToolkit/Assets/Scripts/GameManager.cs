@@ -19,7 +19,7 @@ public class GameManager : MonoBehaviour
 
     public NetworkUI networkUI;
     public Board board;
-    public BlockBlastGameController blockBlastGameController;
+    public GameController gameController;
 
     void Awake()
     {
@@ -135,9 +135,9 @@ public class GameManager : MonoBehaviour
     void NewGame()
     {
         Debug.Log("Starting new game");
-        if (blockBlastGameController != null)
+        if (gameController != null)
         {
-            blockBlastGameController.StartNewGame();
+            gameController.StartNewGame();
             return;
         }
 

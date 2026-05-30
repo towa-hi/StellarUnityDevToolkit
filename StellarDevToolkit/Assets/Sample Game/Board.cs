@@ -5,9 +5,11 @@ public class Board : MonoBehaviour
 {
     [SerializeField] GameObject slotPrefab = null;
     public Dictionary<Vector2Int, BoardCell> boardCells = new Dictionary<Vector2Int, BoardCell>();
+    readonly HashSet<BoardCell> highlightedBoardCells = new HashSet<BoardCell>();
     
     public void InitializeBoard(Vector2Int size)
     {
+        ClearPreviewHighlights();
         if (slotPrefab == null)
         {
             Debug.LogWarning("Board: slotPrefab is missing.", this);
@@ -36,5 +38,71 @@ public class Board : MonoBehaviour
                 boardCells[new Vector2Int(x, y)] = boardCell;
             }
         }
+    }
+
+    public void SetPreviewHighlights(IReadOnlyCollection<Vector2Int> coords)
+    {
+        if (coords == null || coords.Count == 0)
+        {
+            ClearPreviewHighlights();
+            return;
+        }
+
+        HashSet<BoardCell> nextHighlightedBoardCells = new HashSet<BoardCell>();
+        foreach (Vector2Int coord in coords)
+        {
+            if (!boardCells.TryGetValue(coord, out BoardCell boardCell) || boardCell == null)
+            {
+                ClearPreviewHighlights();
+                return;
+            }
+
+            nextHighlightedBoardCells.Add(boardCell);
+        }
+
+        bool isSamePreview =
+            nextHighlightedBoardCells.Count == highlightedBoardCells.Count &&
+            nextHighlightedBoardCells.IsSubsetOf(highlightedBoardCells);
+        if (isSamePreview)
+        {
+            return;
+        }
+
+        foreach (BoardCell boardCell in highlightedBoardCells)
+        {
+            if (!nextHighlightedBoardCells.Contains(boardCell))
+            {
+                boardCell.SetPreviewHighlight(false);
+            }
+        }
+
+        foreach (BoardCell boardCell in nextHighlightedBoardCells)
+        {
+            if (!highlightedBoardCells.Contains(boardCell))
+            {
+                boardCell.SetPreviewHighlight(true);
+            }
+        }
+
+        highlightedBoardCells.Clear();
+        highlightedBoardCells.UnionWith(nextHighlightedBoardCells);
+    }
+
+    public void ClearPreviewHighlights()
+    {
+        if (highlightedBoardCells.Count == 0)
+        {
+            return;
+        }
+
+        foreach (BoardCell boardCell in highlightedBoardCells)
+        {
+            if (boardCell != null)
+            {
+                boardCell.SetPreviewHighlight(false);
+            }
+        }
+
+        highlightedBoardCells.Clear();
     }
 }
