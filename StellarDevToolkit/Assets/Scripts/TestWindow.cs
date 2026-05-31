@@ -1,6 +1,7 @@
 using UnityEngine;
 using UnityEngine.UI;
 using TMPro;
+using Stellar;
 using StellarSDK;
 
 public class TestWindow : MonoBehaviour
@@ -14,6 +15,8 @@ public class TestWindow : MonoBehaviour
     public Button setAssetOwnerToContextButton;
     public Button getSep50BalanceButton;
     public TextMeshProUGUI sep50BalanceResultText;
+    public Button mintSep50AssetButton;
+    public TextMeshProUGUI sep50MintedIdResultText;
     // Start is called once before the first execution of Update after the MonoBehaviour is created
     void Start()
     {
@@ -23,7 +26,13 @@ public class TestWindow : MonoBehaviour
         startGameButton.onClick.AddListener(StartGame);
         setAssetOwnerToContextButton.onClick.AddListener(SetAssetOwnerToContext);
         getSep50BalanceButton.onClick.AddListener(GetSep50Balance);
+        mintSep50AssetButton.onClick.AddListener(MintSep50Asset);
 
+        PopulateDefaultFields();
+    }
+
+    public void PopulateDefaultFields(bool refreshOwnerFromContext = false)
+    {
         GameManager manager = GameManager.Instance;
         if (manager == null)
         {
@@ -32,16 +41,16 @@ public class TestWindow : MonoBehaviour
 
         if (sep50AssetContractAddressInputField != null && string.IsNullOrWhiteSpace(sep50AssetContractAddressInputField.text))
         {
-            string defaultSep50AssetContractAddress = manager.defaultSettings != null
-                ? manager.defaultSettings.sep50AssetContractAddress
-                : null;
-            sep50AssetContractAddressInputField.text = !string.IsNullOrWhiteSpace(defaultSep50AssetContractAddress)
-                ? defaultSep50AssetContractAddress
-                : manager.GetContextContractId();
+            sep50AssetContractAddressInputField.text = manager.GetDefaultSep50AssetContractAddress();
         }
-        if (sep50OwnerAddressInputField != null && string.IsNullOrWhiteSpace(sep50OwnerAddressInputField.text))
+
+        if (sep50OwnerAddressInputField != null)
         {
-            sep50OwnerAddressInputField.text = manager.GetContextAssetOwnerId();
+            string ownerId = manager.GetContextAssetOwnerId();
+            if (refreshOwnerFromContext || string.IsNullOrWhiteSpace(sep50OwnerAddressInputField.text))
+            {
+                sep50OwnerAddressInputField.text = ownerId;
+            }
         }
     }
 
@@ -95,6 +104,47 @@ public class TestWindow : MonoBehaviour
         if (sep50OwnerAddressInputField != null)
         {
             sep50OwnerAddressInputField.text = manager.GetContextAssetOwnerId();
+        }
+    }
+
+    async void MintSep50Asset()
+    {
+        if (sep50MintedIdResultText != null)
+        {
+            sep50MintedIdResultText.text = "Minting...";
+        }
+
+        string assetContractAddress = sep50AssetContractAddressInputField != null ? sep50AssetContractAddressInputField.text : null;
+        string ownerAddressOverride = sep50OwnerAddressInputField != null ? sep50OwnerAddressInputField.text : null;
+        Result<SorobanInvocationMeta> result = await GameManager.Instance.MintSEP50AssetAsync(assetContractAddress, ownerAddressOverride);
+
+        if (sep50MintedIdResultText != null)
+        {
+            if (!result.IsOk)
+            {
+                sep50MintedIdResultText.text = $"Error: {result.Message}";
+                return;
+            }
+
+            Result<SCVal> returnValueResult = StellarClient.GetSorobanReturnValue(result.Value);
+            if (returnValueResult.IsError)
+            {
+                sep50MintedIdResultText.text = $"Error: {returnValueResult.Message}";
+                return;
+            }
+
+            Result<int> mintIdResult = StellarClient.GetU32ReturnValue(returnValueResult.Value);
+            if (mintIdResult.IsError)
+            {
+                sep50MintedIdResultText.text = $"Error: {mintIdResult.Message}";
+                return;
+            }
+
+            Result<SorobanFees> feesResult = StellarClient.GetSorobanFees(result.Value);
+            string feesText = feesResult.IsOk
+                ? $" (resource fee: {feesResult.Value.ResourceFeeCharged} stroops)"
+                : string.Empty;
+            sep50MintedIdResultText.text = $"{mintIdResult.Value}{feesText}";
         }
     }
 }

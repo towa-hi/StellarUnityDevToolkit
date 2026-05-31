@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using UnityEngine;
 
 namespace StellarSDK
 {
@@ -36,7 +35,6 @@ namespace StellarSDK
 
         void BeginStep(string name)
         {
-            Debug.Log($"BeginStep: {name}");
             bool wasBusy = IsBusy;
             activeSteps.Push(name);
             OnStepStarted?.Invoke(name);
@@ -45,7 +43,6 @@ namespace StellarSDK
 
         void EndStep(string name)
         {
-            Debug.Log($"EndStep: {name}");
             if (activeSteps.Count > 0) activeSteps.Pop();
             OnStepEnded?.Invoke(name);
             if (!IsBusy) OnBusyChanged?.Invoke(false);

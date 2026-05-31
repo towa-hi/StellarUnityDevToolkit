@@ -100,7 +100,7 @@ namespace StellarSDK
         public static async Task<Result<(SimulateTransactionResult, SendTransactionResult, GetTransactionResult)>> CallContractFunction(NetworkContext context, string functionName, SCVal[] args, StellarClientTask task = null)
         {
             using var _ = new StellarClientTask.Scope(task, "CallContractFunction");
-            var simResult = await SimulateContractFunction(context, functionName, args, task);
+            var simResult = await SimulateContractFunction(context, functionName, args, false, task);
             if (simResult.IsError)
             {
                 return Result<(SimulateTransactionResult, SendTransactionResult, GetTransactionResult)>.Err(simResult);
@@ -149,15 +149,33 @@ namespace StellarSDK
             return Result<(SimulateTransactionResult, SendTransactionResult, GetTransactionResult)>.Ok((sim, send, get));
         }
 
-        public static async Task<Result<(Transaction, SimulateTransactionResult)>> SimulateContractFunction(NetworkContext context, string functionName, SCVal[] args, StellarClientTask task = null)
+        public static async Task<Result<(Transaction, SimulateTransactionResult)>> SimulateContractFunction(NetworkContext context, string functionName, SCVal[] args, bool skipAccountEntry = false, StellarClientTask task = null)
         {
             using var _ = new StellarClientTask.Scope(task, "SimulateContractFunction");
-            var accountEntryResult = await ReqAccountEntry(context, task);
-            if (accountEntryResult.IsError)
+            AccountEntry accountEntry = new AccountEntry() {
+                accountID = new AccountID(new PublicKey.PublicKeyTypeEd25519()
+                {
+                    ed25519 = StrKey.DecodeStellarAccountId(context.userAccount.AccountId),
+                }),
+                seqNum = new SequenceNumber(42069),
+                balance = new int64(0),
+                numSubEntries = 0,
+                flags = 0,
+                inflationDest = null    ,
+                homeDomain = new string32(""),
+                thresholds = new Thresholds(new byte[] { 0, 0, 0, 0 }),
+                signers = new Signer[] { },
+                ext = new AccountEntry.extUnion.case_0(),
+            };
+            if (!skipAccountEntry)
             {
-                return Result<(Transaction, SimulateTransactionResult)>.Err(accountEntryResult);
+                var accountEntryResult = await ReqAccountEntry(context, task);
+                if (accountEntryResult.IsError)
+                {
+                    return Result<(Transaction, SimulateTransactionResult)>.Err(accountEntryResult);
+                }
+                accountEntry = accountEntryResult.Value;
             }
-            AccountEntry accountEntry = accountEntryResult.Value;
             Transaction invokeContractTransaction = BuildInvokeContractTransaction(context, accountEntry, functionName, args, true);
             string encodedTransaction = EncodeTransaction(invokeContractTransaction);
             Debug.Log($"SimulateContractFunction {functionName} tx XDR: {encodedTransaction}");
@@ -201,54 +219,120 @@ namespace StellarSDK
             return Result<AccountEntry>.Ok(entry?.account);
         }
 
-        public static async Task<Result<int>> GetSEP50AssetBalance(NetworkContext context, string assetContractAddress, string assetOwnerAddressOverride = null, StellarClientTask task = null)
+        public static async Task<Result<SorobanInvocationMeta>> InvokeSEP50AssetMint(NetworkContext context, string assetOwnerAddressOverride = null, StellarClientTask task = null)
         {
-            using var _ = new StellarClientTask.Scope(task, "GetSEP50AssetBalance");
-            if (string.IsNullOrWhiteSpace(assetContractAddress))
-            {
-                return Result<int>.Err(StatusCode.OTHER_ERROR, "GetSEP50AssetBalance requires an asset contract address.");
-            }
-
-            NetworkContext balanceContext = context;
-            balanceContext.contractAddress = assetContractAddress.Trim();
-
+            using var _ = new StellarClientTask.Scope(task, "InvokeSEP50AssetMint");
             SCVal.ScvAddress ownerAddress = !string.IsNullOrWhiteSpace(assetOwnerAddressOverride)
                 ? AccountStringToScvAddress(assetOwnerAddressOverride)
                 : AccountStringToScvAddress(context.userAccount.AccountId);
-            var result = await SimulateContractFunction(balanceContext, "balance", new SCVal[] {
+            var result = await CallContractFunction(context, "mint", new SCVal[] {
                 ownerAddress,
             }, task);
+            if (result.IsError)
+            {
+                return Result<SorobanInvocationMeta>.Err(result);
+            }
+            if (result.Value.Item3 is not GetTransactionResult getResult)
+            {
+                return Result<SorobanInvocationMeta>.Err(StatusCode.DESERIALIZATION_ERROR, "InvokeSEP50AssetMint failed because the transaction result is not a getTransaction response.");
+            }
+            return GetSorobanMeta(getResult);
+        }
+
+        public static async Task<Result<int>> SimSEP50AssetBalance(NetworkContext context, string assetOwnerAddressOverride = null, StellarClientTask task = null)
+        {
+            using var _ = new StellarClientTask.Scope(task, "GetSEP50AssetBalance");
+            SCVal.ScvAddress ownerAddress = !string.IsNullOrWhiteSpace(assetOwnerAddressOverride)
+                ? AccountStringToScvAddress(assetOwnerAddressOverride)
+                : AccountStringToScvAddress(context.userAccount.AccountId);
+            var result = await SimulateContractFunction(context, "balance", new SCVal[] {
+                ownerAddress,
+            }, true, task);
             if (result.IsError)
             {
                 Debug.LogError($"GetSEP50AssetBalance simulation failed: code={result.Code}, message={result.Message}");
                 return Result<int>.Err(result);
             }
-
             SimulateTransactionResult simulation = result.Value.Item2;
-            Debug.Log($"GetSEP50AssetBalance simulation result: {JsonConvert.SerializeObject(simulation, jsonSettings)}");
             SCVal rawBalance = simulation.Results?.FirstOrDefault()?.Result;
             if (rawBalance == null)
             {
                 return Result<int>.Err(StatusCode.DESERIALIZATION_ERROR, "GetSEP50AssetBalance failed because simulation returned no balance value.");
             }
+            if (rawBalance is not SCVal.ScvU32 u32Balance)
+            {
+                return Result<int>.Err(StatusCode.DESERIALIZATION_ERROR, $"GetSEP50AssetBalance expected u32 balance, got {rawBalance.GetType().Name}.");
+            }
+            int parsedBalance = checked((int)u32Balance.u32.InnerValue);
+            return Result<int>.Ok(parsedBalance);
+        }
 
-            try
+        public static async Task<Result<string>> SimSEP50AssetName(NetworkContext context, StellarClientTask task = null)
+        {
+            using var _ = new StellarClientTask.Scope(task, "SimSEP50AssetName");
+            var result = await SimulateContractFunction(context, "name", Array.Empty<SCVal>(), true, task);
+            if (result.IsError)
             {
-                int parsedBalance = rawBalance switch
-                {
-                    SCVal.ScvU32 u32 => checked((int)u32.u32.InnerValue),
-                    SCVal.ScvI32 i32 => i32.i32.InnerValue,
-                    SCVal.ScvU64 u64 => checked((int)u64.u64.InnerValue),
-                    SCVal.ScvI64 i64 => checked((int)i64.i64.InnerValue),
-                    _ => throw new InvalidOperationException($"Unsupported balance SCVal type: {rawBalance.GetType().Name}"),
-                };
-                Debug.Log($"GetSEP50AssetBalance: balance={parsedBalance}");
-                return Result<int>.Ok(parsedBalance);
+                Debug.LogError($"SimSEP50AssetName simulation failed: code={result.Code}, message={result.Message}");
+                return Result<string>.Err(result);
             }
-            catch (Exception e)
+            SimulateTransactionResult simulation = result.Value.Item2;
+            SCVal rawName = simulation.Results?.FirstOrDefault()?.Result;
+            if (rawName == null)
             {
-                return Result<int>.Err(StatusCode.DESERIALIZATION_ERROR, $"GetSEP50AssetBalance failed to parse balance: {e.Message}");
+                return Result<string>.Err(StatusCode.DESERIALIZATION_ERROR, "SimSEP50AssetName failed because simulation returned no name value.");
             }
+            if (rawName is not SCVal.ScvString stringName)
+            {
+                return Result<string>.Err(StatusCode.DESERIALIZATION_ERROR, $"SimSEP50AssetName expected string name, got {rawName.GetType().Name}.");
+            }
+            return Result<string>.Ok(stringName.str.InnerValue);
+        }
+
+        public static async Task<Result<string>> SimSEP50AssetSymbol(NetworkContext context, StellarClientTask task = null)
+        {
+            using var _ = new StellarClientTask.Scope(task, "SimSEP50AssetSymbol");
+            var result = await SimulateContractFunction(context, "symbol", Array.Empty<SCVal>(), true, task);
+            if (result.IsError)
+            {
+                Debug.LogError($"SimSEP50AssetSymbol simulation failed: code={result.Code}, message={result.Message}");
+                return Result<string>.Err(result);
+            }
+            SimulateTransactionResult simulation = result.Value.Item2;
+            SCVal rawSymbol = simulation.Results?.FirstOrDefault()?.Result;
+            if (rawSymbol == null)
+            {
+                return Result<string>.Err(StatusCode.DESERIALIZATION_ERROR, "SimSEP50AssetSymbol failed because simulation returned no symbol value.");
+            }
+            if (rawSymbol is not SCVal.ScvString stringSymbol)
+            {
+                return Result<string>.Err(StatusCode.DESERIALIZATION_ERROR, $"SimSEP50AssetSymbol expected string symbol, got {rawSymbol.GetType().Name}.");
+            }
+            return Result<string>.Ok(stringSymbol.str.InnerValue);
+        }
+
+        public static async Task<Result<SCAddress>> SimSEP50AssetOwner_Of(NetworkContext context, int tokenId, StellarClientTask task = null)
+        {
+            using var _ = new StellarClientTask.Scope(task, "SimSEP50AssetOwner_Of");
+            var result = await SimulateContractFunction(context, "owner_of", new SCVal[] {
+                new SCVal.ScvU32 { u32 = new uint32(checked((uint)tokenId)) },
+            }, true, task);
+            if (result.IsError)
+            {
+                Debug.LogError($"SimSEP50AssetOwner_Of simulation failed: code={result.Code}, message={result.Message}");
+                return Result<SCAddress>.Err(result);
+            }
+            SimulateTransactionResult simulation = result.Value.Item2;
+            SCVal rawOwner = simulation.Results?.FirstOrDefault()?.Result;
+            if (rawOwner == null)
+            {
+                return Result<SCAddress>.Err(StatusCode.DESERIALIZATION_ERROR, "SimSEP50AssetOwner_Of failed because simulation returned no owner value.");
+            }
+            if (rawOwner is not SCVal.ScvAddress addressOwner)
+            {
+                return Result<SCAddress>.Err(StatusCode.DESERIALIZATION_ERROR, $"SimSEP50AssetOwner_Of expected address owner, got {rawOwner.GetType().Name}.");
+            }
+            return Result<SCAddress>.Ok(addressOwner.address);
         }
 
         public static async Task<Result<LedgerEntry.dataUnion.Trustline>> GetAssets(NetworkContext context, string accountIdOverride = null, StellarClientTask task = null)
@@ -808,23 +892,100 @@ namespace StellarSDK
             }
             return Result<MuxedAccount>.Ok(newAccount);
         }
-    }
-}
 
-
-[Serializable]
-public struct SEP50BalanceReq: IScvMapCompatable
-{
-    public SCVal.ScvAddress account;
-
-    public SCVal.ScvMap ToScvMap()
-    {
-        return new SCVal.ScvMap()
+        public static Result<SorobanInvocationMeta> GetSorobanMeta(GetTransactionResult getResult)
         {
-            map = new SCMap(new[]
+            if (getResult?.TransactionResultMeta is not TransactionMeta meta)
             {
-                new SCMapEntry() { key = new SCVal.ScvSymbol() { sym = "account" }, val = account },
-            }),
-        };
+                return Result<SorobanInvocationMeta>.Err(StatusCode.DESERIALIZATION_ERROR,
+                    "GetSorobanMeta failed because transaction result meta is missing.");
+            }
+            return GetSorobanMeta(meta);
+        }
+
+        public static Result<SorobanInvocationMeta> GetSorobanMeta(TransactionMeta meta)
+        {
+            if (meta == null)
+            {
+                return Result<SorobanInvocationMeta>.Err(StatusCode.DESERIALIZATION_ERROR,
+                    "GetSorobanMeta failed because transaction meta is missing.");
+            }
+
+            object sorobanMeta = null;
+            if (meta is TransactionMeta.case_3 case3)
+            {
+                sorobanMeta = case3.v3?.sorobanMeta;
+            }
+            else if (meta is TransactionMeta.case_4 case4)
+            {
+                sorobanMeta = case4.v4?.sorobanMeta;
+            }
+
+            if (sorobanMeta == null)
+            {
+                return Result<SorobanInvocationMeta>.Err(StatusCode.DESERIALIZATION_ERROR,
+                    $"GetSorobanMeta failed because meta has no Soroban block (discriminator {meta.Discriminator}).");
+            }
+
+            return Result<SorobanInvocationMeta>.Ok(new SorobanInvocationMeta(sorobanMeta));
+        }
+
+        public static Result<SCVal> GetSorobanReturnValue(SorobanInvocationMeta sorobanMeta)
+        {
+            SCVal returnValue = sorobanMeta.Meta switch
+            {
+                SorobanTransactionMeta m => m.returnValue,
+                SorobanTransactionMetaV2 m => m.returnValue,
+                _ => null,
+            };
+
+            if (returnValue == null)
+            {
+                return Result<SCVal>.Err(StatusCode.DESERIALIZATION_ERROR,
+                    "GetSorobanReturnValue failed because the invocation returned no value.");
+            }
+
+            return Result<SCVal>.Ok(returnValue);
+        }
+
+        public static Result<SorobanFees> GetSorobanFees(SorobanInvocationMeta sorobanMeta)
+        {
+            if (sorobanMeta.Ext is not SorobanTransactionMetaExt.case_1 extV1 || extV1.v1 == null)
+            {
+                return Result<SorobanFees>.Err(StatusCode.DESERIALIZATION_ERROR,
+                    "GetSorobanFees failed because Soroban meta ext v1 fee breakdown is missing.");
+            }
+
+            SorobanTransactionMetaExtV1 feeExt = extV1.v1;
+            return Result<SorobanFees>.Ok(new SorobanFees(
+                feeExt.totalNonRefundableResourceFeeCharged.InnerValue,
+                feeExt.totalRefundableResourceFeeCharged.InnerValue,
+                feeExt.rentFeeCharged.InnerValue));
+        }
+
+        /// <summary>
+        /// Total fee charged for the transaction (stroops), including inclusion and resource fees.
+        /// </summary>
+        public static Result<long> GetTransactionFeeCharged(TransactionResult transactionResult)
+        {
+            if (transactionResult == null)
+            {
+                return Result<long>.Err(StatusCode.DESERIALIZATION_ERROR,
+                    "GetTransactionFeeCharged failed because transaction result is missing.");
+            }
+
+            return Result<long>.Ok(transactionResult.feeCharged.InnerValue);
+        }
+
+        public static Result<int> GetU32ReturnValue(SCVal returnValue)
+        {
+            if (returnValue is not SCVal.ScvU32 u32Value)
+            {
+                return Result<int>.Err(StatusCode.DESERIALIZATION_ERROR,
+                    $"GetU32ReturnValue expected u32, got {returnValue?.GetType().Name ?? "null"}.");
+            }
+
+            return Result<int>.Ok(checked((int)u32Value.u32.InnerValue));
+        }
     }
 }

@@ -192,7 +192,7 @@ namespace StellarSDK
             {
                 Debug.Log("[TEST] simulateTransaction...");
                 SCVal[] args = { new SCVal.ScvString { str = new SCString("World") } };
-                Result<(Transaction, SimulateTransactionResult)> result = await StellarClient.SimulateContractFunction(context, "hello", args, task);
+                Result<(Transaction, SimulateTransactionResult)> result = await StellarClient.SimulateContractFunction(context, "hello", args, false, task);
                 if (result.IsOk && result.Value.Item2.Error == null)
                 {
                     SimulateTransactionResult sim = result.Value.Item2;
@@ -322,7 +322,7 @@ namespace StellarSDK
 
         static async Task<SCVal> Sim(NetworkContext context, string fn, StellarClientTask task, params SCVal[] args)
         {
-            var result = await StellarClient.SimulateContractFunction(context, fn, args, task);
+            var result = await StellarClient.SimulateContractFunction(context, fn, args, false, task);
             if (result.IsOk && result.Value.Item2.Error == null)
                 return result.Value.Item2.Results?.FirstOrDefault()?.Result;
             Debug.LogError($"  Simulation failed for '{fn}': {result.Message}");

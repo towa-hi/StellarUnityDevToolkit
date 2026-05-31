@@ -22,6 +22,7 @@ public class GameManager : MonoBehaviour
     public NetworkUI networkUI;
     public Board board;
     public GameController gameController;
+    public TestWindow testWindow;
 
     void Awake()
     {
@@ -198,6 +199,7 @@ public class GameManager : MonoBehaviour
         {
             networkContextWindow.PopulateNetworkContext(context);
         }
+        testWindow?.PopulateDefaultFields(refreshOwnerFromContext: true);
     }
 
     static async Task<Result<string>> SignWithUnityWallet(string unsignedEnvelope, string networkPassphrase)
@@ -241,9 +243,40 @@ public class GameManager : MonoBehaviour
         return context.contractAddress ?? string.Empty;
     }
 
+    public string GetDefaultSep50AssetContractAddress()
+    {
+        if (defaultSettings != null && !string.IsNullOrWhiteSpace(defaultSettings.sep50AssetContractAddress))
+        {
+            return defaultSettings.sep50AssetContractAddress;
+        }
+
+        return GetContextContractId();
+    }
+
     public string GetContextAssetOwnerId()
     {
         return context.userAccount != null ? context.userAccount.AccountId : string.Empty;
+    }
+
+    public async Task<Result<SorobanInvocationMeta>> MintSEP50AssetAsync(string assetContractAddress, string ownerAddress = null)
+    {
+        string normalizedAssetContractAddress = string.IsNullOrWhiteSpace(assetContractAddress) ? null : assetContractAddress.Trim();
+        if (normalizedAssetContractAddress == null)
+        {
+            return Result<SorobanInvocationMeta>.Err(StatusCode.OTHER_ERROR, "MintSEP50Asset: asset contract address is required.");
+        }
+        string normalizedOwnerOverride = string.IsNullOrWhiteSpace(ownerAddress) ? null : ownerAddress.Trim();
+        if (normalizedOwnerOverride != null && !Stellar.Utilities.StrKey.IsValidEd25519PublicKey(normalizedOwnerOverride))
+        {
+            return Result<SorobanInvocationMeta>.Err(StatusCode.OTHER_ERROR, $"MintSEP50Asset: invalid owner address override: {normalizedOwnerOverride}");
+        }
+        if (!Stellar.Utilities.StrKey.IsValidContractId(normalizedAssetContractAddress))
+        {
+            return Result<SorobanInvocationMeta>.Err(StatusCode.OTHER_ERROR, $"MintSEP50Asset: invalid asset contract address: {normalizedAssetContractAddress}");
+        }
+        NetworkContext overwrittenContext = context;
+        overwrittenContext.contractAddress = normalizedAssetContractAddress;
+        return await StellarClient.InvokeSEP50AssetMint(overwrittenContext, normalizedOwnerOverride, clientTask);
     }
 
     public async Task<Result<int>> GetSEP50AssetBalanceAsync(string assetContractAddress, string ownerAddress = null)
@@ -253,23 +286,18 @@ public class GameManager : MonoBehaviour
         {
             return Result<int>.Err(StatusCode.OTHER_ERROR, "GetSEP50AssetBalance: asset contract address is required.");
         }
-
         string normalizedOwnerOverride = string.IsNullOrWhiteSpace(ownerAddress) ? null : ownerAddress.Trim();
         if (normalizedOwnerOverride != null && !Stellar.Utilities.StrKey.IsValidEd25519PublicKey(normalizedOwnerOverride))
         {
             return Result<int>.Err(StatusCode.OTHER_ERROR, $"GetSEP50AssetBalance: invalid owner address override: {normalizedOwnerOverride}");
         }
-
         if (!Stellar.Utilities.StrKey.IsValidContractId(normalizedAssetContractAddress))
         {
             return Result<int>.Err(StatusCode.OTHER_ERROR, $"GetSEP50AssetBalance: invalid asset contract address: {normalizedAssetContractAddress}");
         }
-
-        return await StellarClient.GetSEP50AssetBalance(
-            context,
-            normalizedAssetContractAddress,
-            normalizedOwnerOverride,
-            clientTask);
+        NetworkContext overwrittenContext = context;
+        overwrittenContext.contractAddress = normalizedAssetContractAddress;
+        return await StellarClient.SimSEP50AssetBalance(overwrittenContext, normalizedOwnerOverride, clientTask);
     }
 
     async Task TryGetSEP50AssetBalanceAsync(string assetContractAddress, string ownerAddress)
