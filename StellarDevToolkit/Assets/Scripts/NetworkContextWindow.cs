@@ -41,6 +41,7 @@ public class NetworkContextWindow : MonoBehaviour
     {
         bool valid = Stellar.Utilities.StrKey.IsValidEd25519SecretSeed(privateKeyInputField.text);
         publicAddressInputField.text = valid ? MuxedAccount.FromSecretSeed(privateKeyInputField.text).AccountId : "INVALID PRIVATE KEY";
+        Debug.Log(publicAddressInputField.text);
         UpdateSaveButton();
     }
 

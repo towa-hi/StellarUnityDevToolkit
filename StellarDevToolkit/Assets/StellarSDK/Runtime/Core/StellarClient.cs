@@ -71,6 +71,31 @@ namespace StellarSDK
             }
         }
 
+        public static SCVal.ScvAddress AccountStringToScvAddress(string accountAddress)
+        {
+            return new SCVal.ScvAddress()
+            {
+                address = new SCAddress.ScAddressTypeAccount()
+                {
+                    accountId = new AccountID(new PublicKey.PublicKeyTypeEd25519()
+                    {
+                        ed25519 = StrKey.DecodeStellarAccountId(accountAddress),
+                    }),
+                },
+            };
+        }
+
+        public static SCVal.ScvAddress ContractStringToScvAddress(string contractAddress)
+        {
+            return new SCVal.ScvAddress()
+            {
+                address = new SCAddress.ScAddressTypeContract()
+                {
+                    contractId = new Hash(StrKey.DecodeContractId(contractAddress)),
+                },
+            };
+        }
+        
         public static async Task<Result<(SimulateTransactionResult, SendTransactionResult, GetTransactionResult)>> CallContractFunction(NetworkContext context, string functionName, SCVal[] args, StellarClientTask task = null)
         {
             using var _ = new StellarClientTask.Scope(task, "CallContractFunction");
@@ -172,6 +197,22 @@ namespace StellarSDK
             return Result<AccountEntry>.Ok(entry?.account);
         }
 
+        public static async Task<Result<string>> GetSEP50AssetBalance(NetworkContext context, string assetContractAddress, string assetOwnerAddress, StellarClientTask task = null)
+        {
+            using var _ = new StellarClientTask.Scope(task, "GetSEP50AssetBalance");
+            SCVal.ScvAddress assetOwnerAddressScv = AccountStringToScvAddress(assetOwnerAddress);
+            SCVal.ScvAddress assetContractAddressScv = ContractStringToScvAddress(assetContractAddress);
+            var result = await SimulateContractFunction(context, "balance", new SCVal[] {
+                assetOwnerAddressScv,
+                assetContractAddressScv,
+            } ), task);
+            if (result.IsError)
+            {
+                return Result<string>.Err(result);
+            }
+            
+        }
+
         public static async Task<Result<LedgerEntry.dataUnion.Trustline>> GetAssets(NetworkContext context, string accountIdOverride = null, StellarClientTask task = null)
         {
             using var _ = new StellarClientTask.Scope(task, "GetAssets");
@@ -211,7 +252,7 @@ namespace StellarSDK
                                 contractAddress = new SCAddress.ScAddressTypeContract()
                                 {
                                     contractId = new Hash(StrKey.DecodeContractId(context.contractAddress)),
-                                },
+                                } ,
                                 functionName = new SCSymbol(functionName),
                                 args = args,
                             },
