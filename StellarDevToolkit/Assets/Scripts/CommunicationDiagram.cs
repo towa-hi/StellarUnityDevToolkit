@@ -35,13 +35,9 @@ public class CommunicationDiagram : MonoBehaviour
         currentRow = 0;
     }
 
-    void Start()
-    {
-        gameObject.SetActive(false);
-    }
-
     public void SetTask(StellarClientTask task)
     {
+        Debug.Log($"SetTask: ");
         this.task = task;
         task.OnStepStarted += OnStepStarted;
         task.OnStepEnded += OnStepEnded;
