@@ -335,6 +335,30 @@ namespace StellarSDK
             return Result<SCAddress>.Ok(addressOwner.address);
         }
 
+        public static async Task<Result<string>> SimSEP50AssetToken_Uri(NetworkContext context, int tokenId, StellarClientTask task = null)
+        {
+            using var _ = new StellarClientTask.Scope(task, "SimSEP50AssetToken_Uri");
+            var result = await SimulateContractFunction(context, "token_uri", new SCVal[] {
+                new SCVal.ScvU32 { u32 = new uint32(checked((uint)tokenId)) },
+            }, true, task);
+            if (result.IsError)
+            {
+                Debug.LogError($"SimSEP50AssetToken_Uri simulation failed: code={result.Code}, message={result.Message}");
+                return Result<string>.Err(result);
+            }
+            SimulateTransactionResult simulation = result.Value.Item2;
+            SCVal rawTokenUri = simulation.Results?.FirstOrDefault()?.Result;
+            if (rawTokenUri == null)
+            {
+                return Result<string>.Err(StatusCode.DESERIALIZATION_ERROR, "SimSEP50AssetToken_Uri failed because simulation returned no token URI value.");
+            }
+            if (rawTokenUri is not SCVal.ScvString stringTokenUri)
+            {
+                return Result<string>.Err(StatusCode.DESERIALIZATION_ERROR, $"SimSEP50AssetToken_Uri expected string token URI, got {rawTokenUri.GetType().Name}.");
+            }
+            return Result<string>.Ok(stringTokenUri.str.InnerValue);
+        }
+
         public static async Task<Result<LedgerEntry.dataUnion.Trustline>> GetAssets(NetworkContext context, string accountIdOverride = null, StellarClientTask task = null)
         {
             using var _ = new StellarClientTask.Scope(task, "GetAssets");
