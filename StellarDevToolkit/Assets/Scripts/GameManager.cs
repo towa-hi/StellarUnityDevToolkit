@@ -231,6 +231,71 @@ public class GameManager : MonoBehaviour
         NewGame();
     }
 
+    public void TryGetSEP50AssetBalance(string assetContractAddress, string ownerAddress = null)
+    {
+        _ = TryGetSEP50AssetBalanceAsync(assetContractAddress, ownerAddress);
+    }
+
+    public string GetContextContractId()
+    {
+        return context.contractAddress ?? string.Empty;
+    }
+
+    public string GetContextAssetOwnerId()
+    {
+        return context.userAccount != null ? context.userAccount.AccountId : string.Empty;
+    }
+
+    public async Task<Result<int>> GetSEP50AssetBalanceAsync(string assetContractAddress, string ownerAddress = null)
+    {
+        string normalizedAssetContractAddress = string.IsNullOrWhiteSpace(assetContractAddress) ? null : assetContractAddress.Trim();
+        if (normalizedAssetContractAddress == null)
+        {
+            return Result<int>.Err(StatusCode.OTHER_ERROR, "GetSEP50AssetBalance: asset contract address is required.");
+        }
+
+        string normalizedOwnerOverride = string.IsNullOrWhiteSpace(ownerAddress) ? null : ownerAddress.Trim();
+        if (normalizedOwnerOverride != null && !Stellar.Utilities.StrKey.IsValidEd25519PublicKey(normalizedOwnerOverride))
+        {
+            return Result<int>.Err(StatusCode.OTHER_ERROR, $"GetSEP50AssetBalance: invalid owner address override: {normalizedOwnerOverride}");
+        }
+
+        if (!Stellar.Utilities.StrKey.IsValidContractId(normalizedAssetContractAddress))
+        {
+            return Result<int>.Err(StatusCode.OTHER_ERROR, $"GetSEP50AssetBalance: invalid asset contract address: {normalizedAssetContractAddress}");
+        }
+
+        return await StellarClient.GetSEP50AssetBalance(
+            context,
+            normalizedAssetContractAddress,
+            normalizedOwnerOverride,
+            clientTask);
+    }
+
+    async Task TryGetSEP50AssetBalanceAsync(string assetContractAddress, string ownerAddress)
+    {
+        try
+        {
+            string normalizedAssetContractAddress = string.IsNullOrWhiteSpace(assetContractAddress) ? null : assetContractAddress.Trim();
+            string normalizedOwnerOverride = string.IsNullOrWhiteSpace(ownerAddress) ? null : ownerAddress.Trim();
+            Result<int> result = await GetSEP50AssetBalanceAsync(normalizedAssetContractAddress, normalizedOwnerOverride);
+
+            if (result.IsOk)
+            {
+                string ownerForLog = normalizedOwnerOverride ?? context.userAccount.AccountId;
+                Debug.Log($"GetSEP50AssetBalance: owner={ownerForLog}, contract={normalizedAssetContractAddress}, balance={result.Value}");
+            }
+            else
+            {
+                Debug.LogError($"GetSEP50AssetBalance failed: {result.Message}");
+            }
+        }
+        catch (Exception exception)
+        {
+            Debug.LogError($"GetSEP50AssetBalance failed: {exception.Message}");
+        }
+    }
+
     void NewGame()
     {
         Debug.Log("Starting new game");

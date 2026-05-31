@@ -11,5 +11,6 @@ public class DefaultSettings : ScriptableObject
     public string mainnetAssetIssuerAddress;
     public string testnetAssetCode;
     public string mainnetAssetCode;
+    public string sep50AssetContractAddress;
 
 }

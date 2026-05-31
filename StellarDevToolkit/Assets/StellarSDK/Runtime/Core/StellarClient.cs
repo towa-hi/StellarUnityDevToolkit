@@ -9,6 +9,7 @@ using Newtonsoft.Json.Serialization;
 using Stellar;
 using Stellar.RPC;
 using Stellar.Utilities;
+using StellarSDK;
 using UnityEngine;
 using UnityEngine.Networking;
 
@@ -158,9 +159,11 @@ namespace StellarSDK
             }
             AccountEntry accountEntry = accountEntryResult.Value;
             Transaction invokeContractTransaction = BuildInvokeContractTransaction(context, accountEntry, functionName, args, true);
+            string encodedTransaction = EncodeTransaction(invokeContractTransaction);
+            Debug.Log($"SimulateContractFunction {functionName} tx XDR: {encodedTransaction}");
             var result = await SimulateTransactionAsync(context, new SimulateTransactionParams()
             {
-                Transaction = EncodeTransaction(invokeContractTransaction),
+                Transaction = encodedTransaction,
                 ResourceConfig = new(),
             }, task);
             if (result.IsError)
@@ -170,6 +173,7 @@ namespace StellarSDK
             SimulateTransactionResult simulateTransactionResult = result.Value;
             if (simulateTransactionResult.Error != null)
             {
+                Debug.LogError($"SimulateContractFunction {functionName} failed simulation payload: {JsonConvert.SerializeObject(simulateTransactionResult, jsonSettings)}");
                 StatusCode code = HasContractError(simulateTransactionResult) ? StatusCode.CONTRACT_ERROR : StatusCode.SIMULATION_FAILED;
                 return Result<(Transaction, SimulateTransactionResult)>.Err(code, (invokeContractTransaction, simulateTransactionResult), $"SimulateContractFunction {functionName} failed because the simulation result was not successful");
             }
@@ -197,20 +201,54 @@ namespace StellarSDK
             return Result<AccountEntry>.Ok(entry?.account);
         }
 
-        public static async Task<Result<string>> GetSEP50AssetBalance(NetworkContext context, string assetContractAddress, string assetOwnerAddress, StellarClientTask task = null)
+        public static async Task<Result<int>> GetSEP50AssetBalance(NetworkContext context, string assetContractAddress, string assetOwnerAddressOverride = null, StellarClientTask task = null)
         {
             using var _ = new StellarClientTask.Scope(task, "GetSEP50AssetBalance");
-            SCVal.ScvAddress assetOwnerAddressScv = AccountStringToScvAddress(assetOwnerAddress);
-            SCVal.ScvAddress assetContractAddressScv = ContractStringToScvAddress(assetContractAddress);
-            var result = await SimulateContractFunction(context, "balance", new SCVal[] {
-                assetOwnerAddressScv,
-                assetContractAddressScv,
-            } ), task);
+            if (string.IsNullOrWhiteSpace(assetContractAddress))
+            {
+                return Result<int>.Err(StatusCode.OTHER_ERROR, "GetSEP50AssetBalance requires an asset contract address.");
+            }
+
+            NetworkContext balanceContext = context;
+            balanceContext.contractAddress = assetContractAddress.Trim();
+
+            SCVal.ScvAddress ownerAddress = !string.IsNullOrWhiteSpace(assetOwnerAddressOverride)
+                ? AccountStringToScvAddress(assetOwnerAddressOverride)
+                : AccountStringToScvAddress(context.userAccount.AccountId);
+            var result = await SimulateContractFunction(balanceContext, "balance", new SCVal[] {
+                ownerAddress,
+            }, task);
             if (result.IsError)
             {
-                return Result<string>.Err(result);
+                Debug.LogError($"GetSEP50AssetBalance simulation failed: code={result.Code}, message={result.Message}");
+                return Result<int>.Err(result);
             }
-            
+
+            SimulateTransactionResult simulation = result.Value.Item2;
+            Debug.Log($"GetSEP50AssetBalance simulation result: {JsonConvert.SerializeObject(simulation, jsonSettings)}");
+            SCVal rawBalance = simulation.Results?.FirstOrDefault()?.Result;
+            if (rawBalance == null)
+            {
+                return Result<int>.Err(StatusCode.DESERIALIZATION_ERROR, "GetSEP50AssetBalance failed because simulation returned no balance value.");
+            }
+
+            try
+            {
+                int parsedBalance = rawBalance switch
+                {
+                    SCVal.ScvU32 u32 => checked((int)u32.u32.InnerValue),
+                    SCVal.ScvI32 i32 => i32.i32.InnerValue,
+                    SCVal.ScvU64 u64 => checked((int)u64.u64.InnerValue),
+                    SCVal.ScvI64 i64 => checked((int)i64.i64.InnerValue),
+                    _ => throw new InvalidOperationException($"Unsupported balance SCVal type: {rawBalance.GetType().Name}"),
+                };
+                Debug.Log($"GetSEP50AssetBalance: balance={parsedBalance}");
+                return Result<int>.Ok(parsedBalance);
+            }
+            catch (Exception e)
+            {
+                return Result<int>.Err(StatusCode.DESERIALIZATION_ERROR, $"GetSEP50AssetBalance failed to parse balance: {e.Message}");
+            }
         }
 
         public static async Task<Result<LedgerEntry.dataUnion.Trustline>> GetAssets(NetworkContext context, string accountIdOverride = null, StellarClientTask task = null)
@@ -770,5 +808,23 @@ namespace StellarSDK
             }
             return Result<MuxedAccount>.Ok(newAccount);
         }
+    }
+}
+
+
+[Serializable]
+public struct SEP50BalanceReq: IScvMapCompatable
+{
+    public SCVal.ScvAddress account;
+
+    public SCVal.ScvMap ToScvMap()
+    {
+        return new SCVal.ScvMap()
+        {
+            map = new SCMap(new[]
+            {
+                new SCMapEntry() { key = new SCVal.ScvSymbol() { sym = "account" }, val = account },
+            }),
+        };
     }
 }
