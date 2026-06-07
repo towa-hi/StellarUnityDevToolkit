@@ -1,6 +1,7 @@
 using UnityEngine;
 using Stellar;
 using Stellar.RPC;
+using Stellar.Utilities;
 using StellarSDK;
 using System.Collections.Generic;
 using System.Linq;
@@ -120,6 +121,43 @@ namespace StellarSDK
                 else
                 {
                     Debug.LogError($"[FAIL] getLedgerEntries: {result.Message}");
+                    c.Failed++;
+                }
+            }
+
+            // --- ReqSEP50AssetOwnerMap ---
+            if (!string.IsNullOrWhiteSpace(context.contractAddress) && StrKey.IsValidContractId(context.contractAddress))
+            {
+                Debug.Log("[TEST] ReqSEP50AssetOwnerMap...");
+                Result<int> totalSupplyResult = await StellarClient.SimSEP50AssetTotal_Supply(context, task);
+                Result<Dictionary<int, string>> ownerMapResult = await StellarClient.ReqSEP50AssetOwnerMap(context, task);
+                if (ownerMapResult.IsOk && totalSupplyResult.IsOk && ownerMapResult.Value.Count == totalSupplyResult.Value)
+                {
+                    bool spotCheckPassed = true;
+                    if (totalSupplyResult.Value > 0)
+                    {
+                        const int spotCheckTokenId = 0;
+                        Result<SCAddress> simOwnerResult = await StellarClient.SimSEP50AssetOwner_Of(context, spotCheckTokenId, task);
+                        spotCheckPassed = simOwnerResult.IsOk
+                            && ownerMapResult.Value.TryGetValue(spotCheckTokenId, out string ledgerOwner)
+                            && ledgerOwner == ScAddressToStrKey(simOwnerResult.Value);
+                    }
+
+                    if (spotCheckPassed)
+                    {
+                        Debug.Log($"[PASS] ReqSEP50AssetOwnerMap: count={ownerMapResult.Value.Count}");
+                        c.Passed++;
+                    }
+                    else
+                    {
+                        Debug.LogError("[FAIL] ReqSEP50AssetOwnerMap: owner spot-check mismatch for token 0");
+                        c.Failed++;
+                    }
+                }
+                else
+                {
+                    string message = ownerMapResult.IsError ? ownerMapResult.Message : "owner map count did not match total supply";
+                    Debug.LogError($"[FAIL] ReqSEP50AssetOwnerMap: {message}");
                     c.Failed++;
                 }
             }
@@ -365,5 +403,22 @@ namespace StellarSDK
                 Entry(Sym("name"), Str(name)),
                 Entry(Sym("score"), U32(score))
             );
+
+        static string ScAddressToStrKey(SCAddress address)
+        {
+            switch (address)
+            {
+                case SCAddress.ScAddressTypeAccount accountAddress:
+                    if (accountAddress.accountId.InnerValue is PublicKey.PublicKeyTypeEd25519 ed25519Key)
+                    {
+                        return StrKey.EncodeStellarAccountId(ed25519Key.ed25519.InnerValue);
+                    }
+                    return null;
+                case SCAddress.ScAddressTypeContract contractAddress:
+                    return StrKey.EncodeContractId(contractAddress.contractId.InnerValue);
+                default:
+                    return null;
+            }
+        }
     }
 }

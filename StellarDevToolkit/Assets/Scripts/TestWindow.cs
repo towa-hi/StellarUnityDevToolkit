@@ -1,3 +1,5 @@
+using System.Collections.Generic;
+using System.Text;
 using UnityEngine;
 using UnityEngine.UI;
 using TMPro;
@@ -17,6 +19,7 @@ public class TestWindow : MonoBehaviour
     public TextMeshProUGUI sep50BalanceResultText;
     public Button mintSep50AssetButton;
     public TextMeshProUGUI sep50MintedIdResultText;
+    public Button getSep50OwnerMapButton;
     // Start is called once before the first execution of Update after the MonoBehaviour is created
     void Start()
     {
@@ -27,6 +30,10 @@ public class TestWindow : MonoBehaviour
         setAssetOwnerToContextButton.onClick.AddListener(SetAssetOwnerToContext);
         getSep50BalanceButton.onClick.AddListener(GetSep50Balance);
         mintSep50AssetButton.onClick.AddListener(MintSep50Asset);
+        if (getSep50OwnerMapButton != null)
+        {
+            getSep50OwnerMapButton.onClick.AddListener(GetSep50OwnerMap);
+        }
 
         PopulateDefaultFields();
     }
@@ -146,5 +153,25 @@ public class TestWindow : MonoBehaviour
                 : string.Empty;
             sep50MintedIdResultText.text = $"{mintIdResult.Value}{feesText}";
         }
+    }
+
+    async void GetSep50OwnerMap()
+    {
+        string assetContractAddress = sep50AssetContractAddressInputField != null ? sep50AssetContractAddressInputField.text : null;
+        Result<Dictionary<int, string>> result = await GameManager.Instance.GetSEP50AssetOwnerMapAsync(assetContractAddress);
+
+        if (!result.IsOk)
+        {
+            Debug.LogError($"GetSEP50OwnerMap failed: {result.Message}");
+            return;
+        }
+
+        var logBuilder = new StringBuilder();
+        logBuilder.AppendLine($"GetSEP50OwnerMap: contract={assetContractAddress?.Trim()}, count={result.Value.Count}");
+        foreach (var entry in result.Value)
+        {
+            logBuilder.AppendLine($"tokenId={entry.Key} owner={entry.Value}");
+        }
+        Debug.Log(logBuilder.ToString());
     }
 }

@@ -359,6 +359,135 @@ namespace StellarSDK
             return Result<string>.Ok(stringTokenUri.str.InnerValue);
         }
 
+        public static async Task<Result<int>> SimSEP50AssetTotal_Supply(NetworkContext context, StellarClientTask task = null)
+        {
+            using var _ = new StellarClientTask.Scope(task, "SimSEP50AssetTotal_Supply");
+            var result = await SimulateContractFunction(context, "total_supply", Array.Empty<SCVal>(), true, task);
+            if (result.IsError)
+            {
+                Debug.LogError($"SimSEP50AssetTotal_Supply simulation failed: code={result.Code}, message={result.Message}");
+                return Result<int>.Err(result);
+            }
+            SimulateTransactionResult simulation = result.Value.Item2;
+            SCVal rawTotalSupply = simulation.Results?.FirstOrDefault()?.Result;
+            if (rawTotalSupply == null)
+            {
+                return Result<int>.Err(StatusCode.DESERIALIZATION_ERROR, "SimSEP50AssetTotal_Supply failed because simulation returned no total supply value.");
+            }
+            if (rawTotalSupply is not SCVal.ScvU32 u32TotalSupply)
+            {
+                return Result<int>.Err(StatusCode.DESERIALIZATION_ERROR, $"SimSEP50AssetTotal_Supply expected u32 total supply, got {rawTotalSupply.GetType().Name}.");
+            }
+            int parsedTotalSupply = checked((int)u32TotalSupply.u32.InnerValue);
+            return Result<int>.Ok(parsedTotalSupply);
+        }
+
+        public static async Task<Result<Dictionary<int, string>>> ReqSEP50AssetOwnerMap(NetworkContext context, StellarClientTask task = null)
+        {
+            using var _ = new StellarClientTask.Scope(task, "ReqSEP50AssetOwnerMap");
+            const int maxKeysPerRequest = 200;
+
+            Result<int> totalSupplyResult = await SimSEP50AssetTotal_Supply(context, task);
+            if (totalSupplyResult.IsError)
+            {
+                return Result<Dictionary<int, string>>.Err(totalSupplyResult);
+            }
+
+            int totalSupply = totalSupplyResult.Value;
+            if (totalSupply == 0)
+            {
+                return Result<Dictionary<int, string>>.Ok(new Dictionary<int, string>());
+            }
+
+            var ownerMap = new Dictionary<int, string>(totalSupply);
+            for (int batchStart = 0; batchStart < totalSupply; batchStart += maxKeysPerRequest)
+            {
+                int batchCount = Math.Min(maxKeysPerRequest, totalSupply - batchStart);
+                var keys = new string[batchCount];
+                var expectedTokenIds = new int[batchCount];
+                for (int i = 0; i < batchCount; i++)
+                {
+                    int tokenId = batchStart + i;
+                    expectedTokenIds[i] = tokenId;
+                    keys[i] = EncodedOwnerLedgerKey(context, tokenId);
+                }
+
+                var ledgerResult = await GetLedgerEntriesAsync(context, new GetLedgerEntriesParams
+                {
+                    Keys = keys,
+                }, task);
+                if (ledgerResult.IsError)
+                {
+                    return Result<Dictionary<int, string>>.Err(ledgerResult);
+                }
+
+                GetLedgerEntriesResult ledgerEntries = ledgerResult.Value;
+                if (ledgerEntries.Entries == null || ledgerEntries.Entries.Count != batchCount)
+                {
+                    return Result<Dictionary<int, string>>.Err(
+                        StatusCode.ENTRY_NOT_FOUND,
+                        $"ReqSEP50AssetOwnerMap: expected {batchCount} Owner entries, got {ledgerEntries.Entries?.Count ?? 0}.");
+                }
+
+                var foundTokenIds = new HashSet<int>();
+                foreach (Entries entry in ledgerEntries.Entries)
+                {
+                    if (!TryParseOwnerLedgerEntry(entry, out int tokenId, out string ownerAddress))
+                    {
+                        return Result<Dictionary<int, string>>.Err(
+                            StatusCode.DESERIALIZATION_ERROR,
+                            "ReqSEP50AssetOwnerMap: failed to decode an Owner ledger entry.");
+                    }
+
+                    if (!foundTokenIds.Add(tokenId))
+                    {
+                        return Result<Dictionary<int, string>>.Err(
+                            StatusCode.DESERIALIZATION_ERROR,
+                            $"ReqSEP50AssetOwnerMap: duplicate Owner entry for token id {tokenId}.");
+                    }
+
+                    ownerMap[tokenId] = ownerAddress;
+                }
+
+                foreach (int tokenId in expectedTokenIds)
+                {
+                    if (!foundTokenIds.Contains(tokenId))
+                    {
+                        return Result<Dictionary<int, string>>.Err(
+                            StatusCode.ENTRY_NOT_FOUND,
+                            $"ReqSEP50AssetOwnerMap: missing Owner entry for token id {tokenId}.");
+                    }
+                }
+            }
+
+            return Result<Dictionary<int, string>>.Ok(ownerMap);
+        }
+
+        public static async Task<Result<bool>> InvokeSEP50AssetTransfer(NetworkContext context, int tokenId, string destinationAddress, StellarClientTask task = null)
+        {
+            using var _ = new StellarClientTask.Scope(task, "InvokeSEP50AssetTransfer");
+            SCVal.ScvAddress fromAddress = AccountStringToScvAddress(context.userAccount.AccountId);
+            SCVal.ScvAddress toAddress = AccountStringToScvAddress(destinationAddress);
+            var result = await CallContractFunction(context, "transfer", new SCVal[] {
+                fromAddress,
+                toAddress,
+                new SCVal.ScvU32 { u32 = new uint32(checked((uint)tokenId)) },
+            }, task);
+            if (result.IsError)
+            {
+                return Result<bool>.Err(result);
+            }
+            if (result.Value.Item3 is not GetTransactionResult getResult)
+            {
+                return Result<bool>.Err(StatusCode.DESERIALIZATION_ERROR, "InvokeSEP50AssetTransfer failed because the transaction result is not a getTransaction response.");
+            }
+            if (getResult.Status != GetTransactionResult_Status.SUCCESS)
+            {
+                return Result<bool>.Err(StatusCode.TRANSACTION_FAILED, "InvokeSEP50AssetTransfer failed because the transaction did not succeed.");
+            }
+            return Result<bool>.Ok(true);
+        }
+
         public static async Task<Result<LedgerEntry.dataUnion.Trustline>> GetAssets(NetworkContext context, string accountIdOverride = null, StellarClientTask task = null)
         {
             using var _ = new StellarClientTask.Scope(task, "GetAssets");
@@ -868,6 +997,86 @@ namespace StellarSDK
                     accountID = context.userAccount.XdrPublicKey,
                 },
             });
+        }
+
+        static string EncodedOwnerLedgerKey(NetworkContext context, int tokenId)
+        {
+            LedgerKey ledgerKey = MakeLedgerKey(context, "Owner", (uint)tokenId, ContractDataDurability.PERSISTENT);
+            return LedgerKeyXdr.EncodeToBase64(ledgerKey);
+        }
+
+        static bool TryGetOwnerTokenIdFromContractKey(SCVal key, out int tokenId)
+        {
+            tokenId = 0;
+            if (key is not SCVal.ScvVec ownerKeyVec)
+            {
+                return false;
+            }
+
+            SCVal[] parts = ownerKeyVec.vec.InnerValue;
+            if (parts.Length != 2)
+            {
+                return false;
+            }
+
+            if (parts[0] is not SCVal.ScvSymbol ownerSymbol || ownerSymbol.sym.InnerValue != "Owner")
+            {
+                return false;
+            }
+
+            if (parts[1] is not SCVal.ScvU32 tokenIdVal)
+            {
+                return false;
+            }
+
+            tokenId = checked((int)tokenIdVal.u32.InnerValue);
+            return true;
+        }
+
+        static bool TryParseOwnerLedgerEntry(Entries entry, out int tokenId, out string ownerAddress)
+        {
+            tokenId = 0;
+            ownerAddress = null;
+
+            if (entry.LedgerKey is not LedgerKey.ContractData contractLedgerKey)
+            {
+                return false;
+            }
+
+            if (!TryGetOwnerTokenIdFromContractKey(contractLedgerKey.contractData.key, out tokenId))
+            {
+                return false;
+            }
+
+            if (entry.LedgerEntryData is not LedgerEntry.dataUnion.ContractData contractEntry)
+            {
+                return false;
+            }
+
+            if (contractEntry.contractData.val is not SCVal.ScvAddress addressVal)
+            {
+                return false;
+            }
+
+            ownerAddress = ScAddressToString(addressVal.address);
+            return ownerAddress != null;
+        }
+
+        static string ScAddressToString(SCAddress address)
+        {
+            switch (address)
+            {
+                case SCAddress.ScAddressTypeAccount accountAddress:
+                    if (accountAddress.accountId.InnerValue is PublicKey.PublicKeyTypeEd25519 ed25519Key)
+                    {
+                        return StrKey.EncodeStellarAccountId(ed25519Key.ed25519.InnerValue);
+                    }
+                    return null;
+                case SCAddress.ScAddressTypeContract contractAddress:
+                    return StrKey.EncodeContractId(contractAddress.contractId.InnerValue);
+                default:
+                    return null;
+            }
         }
 
         static string EncodedTrustlineKey(NetworkContext context, string accountIdOverride = null)

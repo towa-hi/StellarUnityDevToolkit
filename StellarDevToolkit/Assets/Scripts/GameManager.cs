@@ -1,5 +1,6 @@
 using UnityEngine;
 using System;
+using System.Collections.Generic;
 using System.Threading.Tasks;
 using Stellar;
 using StellarSDK;
@@ -23,7 +24,8 @@ public class GameManager : MonoBehaviour
     public Board board;
     public GameController gameController;
     public TestWindow testWindow;
-
+    public AssetModal assetModal;
+    public SendModal sendModal;
     void Awake()
     {
         if (Instance == null)
@@ -300,6 +302,68 @@ public class GameManager : MonoBehaviour
         return await StellarClient.SimSEP50AssetBalance(overwrittenContext, normalizedOwnerOverride, clientTask);
     }
 
+    public async Task<Result<Dictionary<int, string>>> GetSEP50AssetOwnerMapAsync(string assetContractAddress)
+    {
+        Result<(Dictionary<int, string> ownerMap, string contractAddress)> result = await FetchSEP50AssetOwnerMapAsync(assetContractAddress);
+        if (result.IsError)
+        {
+            return Result<Dictionary<int, string>>.Err(result);
+        }
+
+        (Dictionary<int, string> ownerMap, string normalizedAssetContractAddress) = result.Value;
+        if (assetModal == null)
+        {
+            return Result<Dictionary<int, string>>.Err(StatusCode.OTHER_ERROR, "GetSEP50AssetOwnerMap: assetModal is not assigned.");
+        }
+
+        assetModal.SetAssets(ownerMap, GetContextAssetOwnerId(), normalizedAssetContractAddress);
+        assetModal.SetOpen(true);
+        return Result<Dictionary<int, string>>.Ok(ownerMap);
+    }
+
+    public async Task<Result<Dictionary<int, string>>> RefreshAssetModalAsync(string assetContractAddress = null)
+    {
+        Result<(Dictionary<int, string> ownerMap, string contractAddress)> result = await FetchSEP50AssetOwnerMapAsync(assetContractAddress);
+        if (result.IsError)
+        {
+            return Result<Dictionary<int, string>>.Err(result);
+        }
+
+        (Dictionary<int, string> ownerMap, string normalizedAssetContractAddress) = result.Value;
+        if (assetModal == null)
+        {
+            return Result<Dictionary<int, string>>.Err(StatusCode.OTHER_ERROR, "RefreshAssetModal: assetModal is not assigned.");
+        }
+
+        assetModal.SetAssets(ownerMap, GetContextAssetOwnerId(), normalizedAssetContractAddress);
+        return Result<Dictionary<int, string>>.Ok(ownerMap);
+    }
+
+    async Task<Result<(Dictionary<int, string> ownerMap, string contractAddress)>> FetchSEP50AssetOwnerMapAsync(string assetContractAddress)
+    {
+        string normalizedAssetContractAddress = string.IsNullOrWhiteSpace(assetContractAddress)
+            ? GetDefaultSep50AssetContractAddress()
+            : assetContractAddress.Trim();
+        if (string.IsNullOrWhiteSpace(normalizedAssetContractAddress))
+        {
+            return Result<(Dictionary<int, string>, string)>.Err(StatusCode.OTHER_ERROR, "GetSEP50AssetOwnerMap: asset contract address is required.");
+        }
+        if (!Stellar.Utilities.StrKey.IsValidContractId(normalizedAssetContractAddress))
+        {
+            return Result<(Dictionary<int, string>, string)>.Err(StatusCode.OTHER_ERROR, $"GetSEP50AssetOwnerMap: invalid asset contract address: {normalizedAssetContractAddress}");
+        }
+
+        NetworkContext overwrittenContext = context;
+        overwrittenContext.contractAddress = normalizedAssetContractAddress;
+        Result<Dictionary<int, string>> result = await StellarClient.ReqSEP50AssetOwnerMap(overwrittenContext, clientTask);
+        if (result.IsError)
+        {
+            return Result<(Dictionary<int, string>, string)>.Err(result);
+        }
+
+        return Result<(Dictionary<int, string>, string)>.Ok((result.Value, normalizedAssetContractAddress));
+    }
+
     async Task TryGetSEP50AssetBalanceAsync(string assetContractAddress, string ownerAddress)
     {
         try
@@ -321,6 +385,84 @@ public class GameManager : MonoBehaviour
         catch (Exception exception)
         {
             Debug.LogError($"GetSEP50AssetBalance failed: {exception.Message}");
+        }
+    }
+
+    public void SendAsset(int tokenId, string destinationAddress, string assetContractAddress = null)
+    {
+        _ = SendAssetAsync(tokenId, destinationAddress, assetContractAddress);
+    }
+
+    public void OpenSendModal(AssetCard assetCard, string assetContractAddress)
+    {
+        if (sendModal == null)
+        {
+            Debug.LogError("GameManager: sendModal is not assigned.");
+            return;
+        }
+
+        sendModal.SetAsset(assetCard, assetContractAddress);
+        sendModal.SetOpen(true);
+        sendModal.transform.SetAsLastSibling();
+    }
+
+    public void CloseSendModal()
+    {
+        if (sendModal != null)
+        {
+            sendModal.SetOpen(false);
+        }
+    }
+
+    public async Task<Result<bool>> SendSEP50AssetAsync(int tokenId, string destinationAddress, string assetContractAddress = null)
+    {
+        string normalizedDestination = string.IsNullOrWhiteSpace(destinationAddress) ? null : destinationAddress.Trim();
+        if (normalizedDestination == null)
+        {
+            return Result<bool>.Err(StatusCode.OTHER_ERROR, "SendSEP50Asset: destination address is required.");
+        }
+        if (!Stellar.Utilities.StrKey.IsValidEd25519PublicKey(normalizedDestination))
+        {
+            return Result<bool>.Err(StatusCode.OTHER_ERROR, $"SendSEP50Asset: invalid destination address: {normalizedDestination}");
+        }
+        string normalizedAssetContractAddress = string.IsNullOrWhiteSpace(assetContractAddress)
+            ? GetDefaultSep50AssetContractAddress()
+            : assetContractAddress.Trim();
+        if (string.IsNullOrWhiteSpace(normalizedAssetContractAddress))
+        {
+            return Result<bool>.Err(StatusCode.OTHER_ERROR, "SendSEP50Asset: asset contract address is required.");
+        }
+        if (!Stellar.Utilities.StrKey.IsValidContractId(normalizedAssetContractAddress))
+        {
+            return Result<bool>.Err(StatusCode.OTHER_ERROR, $"SendSEP50Asset: invalid asset contract address: {normalizedAssetContractAddress}");
+        }
+        NetworkContext overwrittenContext = context;
+        overwrittenContext.contractAddress = normalizedAssetContractAddress;
+        return await StellarClient.InvokeSEP50AssetTransfer(overwrittenContext, tokenId, normalizedDestination, clientTask);
+    }
+
+    async Task SendAssetAsync(int tokenId, string destinationAddress, string assetContractAddress = null)
+    {
+        try
+        {
+            Result<bool> result = await SendSEP50AssetAsync(tokenId, destinationAddress, assetContractAddress);
+            if (result.IsOk)
+            {
+                Debug.Log($"SendAsset: token={tokenId}, destination={destinationAddress.Trim()}");
+                Result<Dictionary<int, string>> refreshResult = await RefreshAssetModalAsync(assetContractAddress);
+                if (refreshResult.IsError)
+                {
+                    Debug.LogError($"SendAsset: failed to refresh asset map: {refreshResult.Message}");
+                }
+            }
+            else
+            {
+                Debug.LogError($"SendAsset failed: {result.Message}");
+            }
+        }
+        catch (Exception exception)
+        {
+            Debug.LogError($"SendAsset failed: {exception.Message}");
         }
     }
 
