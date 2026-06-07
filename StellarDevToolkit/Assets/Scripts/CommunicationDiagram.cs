@@ -37,7 +37,6 @@ public class CommunicationDiagram : MonoBehaviour
 
     public void SetTask(StellarClientTask task)
     {
-        Debug.Log($"SetTask: ");
         this.task = task;
         task.OnStepStarted += OnStepStarted;
         task.OnStepEnded += OnStepEnded;

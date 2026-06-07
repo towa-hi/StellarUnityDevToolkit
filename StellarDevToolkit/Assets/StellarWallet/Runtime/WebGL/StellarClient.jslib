@@ -5,11 +5,6 @@ mergeInto(LibraryManager.library, {
         var size = lengthBytesUTF8(str) + 1;
         var ptr = _malloc(size);
         stringToUTF8(str, ptr, size);
-        // #region agent log
-        try {
-            fetch('http://127.0.0.1:7532/ingest/d6cddc79-b52b-4cf0-a18c-440d158ba1e4',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'2bf4d9'},body:JSON.stringify({sessionId:'2bf4d9',runId:'pkg-loader',hypothesisId:'E',location:'StellarClient.jslib:WalletRespond',message:'invoking C# callback',data:{requestId:requestId,code:code},timestamp:Date.now()})}).catch(function(){});
-        } catch (e) {}
-        // #endregion
         {{{ makeDynCall('viii', 'callback') }}}(requestId, code, ptr);
         _free(ptr);
     },
@@ -22,11 +17,6 @@ mergeInto(LibraryManager.library, {
             if (Module.StellarWalletFreighterReady && typeof Module.StellarWalletFreighterReady.then === "function") {
                 await Module.StellarWalletFreighterReady;
             }
-            // #region agent log
-            try {
-                fetch('http://127.0.0.1:7532/ingest/d6cddc79-b52b-4cf0-a18c-440d158ba1e4',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'2bf4d9'},body:JSON.stringify({sessionId:'2bf4d9',runId:'pkg-loader',hypothesisId:'C',location:'StellarClient.jslib:JSCheckWallet',message:'JSCheckWallet after awaiting loader',data:{hasFreighterApi:!!window.freighterApi,freighterApiType:typeof window.freighterApi},timestamp:Date.now()})}).catch(function(){});
-            } catch (e) {}
-            // #endregion
             const FreighterApi = window.freighterApi;
             if (!FreighterApi) {
                 WalletRespond(requestId, callback, -1, `JSCheckWallet() failed because Freighter API not detected.`);
