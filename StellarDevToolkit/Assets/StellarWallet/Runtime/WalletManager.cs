@@ -1,6 +1,9 @@
 using System;
+using System.Collections.Generic;
 using System.Runtime.InteropServices;
+using System.Threading;
 using System.Threading.Tasks;
+using AOT;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Serialization;
 using UnityEngine;
@@ -60,28 +63,34 @@ namespace StellarWallet
         }
     }
 
-    public class WalletManager : MonoBehaviour
+    public static class WalletManager
     {
-        [DllImport("__Internal")]
-        static extern void JSCheckWallet();
+        // JS -> C# results are delivered through this function-pointer callback, correlated
+        // by requestId, so WalletManager needs no GameObject and can be fully static.
+        delegate void WalletResponseCallback(int requestId, int code, IntPtr dataPtr);
 
         [DllImport("__Internal")]
-        static extern void JSGetFreighterAddress(string isTestnet);
+        static extern void JSCheckWallet(int requestId, WalletResponseCallback callback);
 
         [DllImport("__Internal")]
-        static extern void JSGetNetworkDetails();
+        static extern void JSGetFreighterAddress(int requestId, WalletResponseCallback callback, string isTestnet);
 
         [DllImport("__Internal")]
-        static extern void JSSignTransaction(string unsignedTransactionEnvelope, string networkPassphrase);
+        static extern void JSGetNetworkDetails(int requestId, WalletResponseCallback callback);
+
+        [DllImport("__Internal")]
+        static extern void JSSignTransaction(int requestId, WalletResponseCallback callback, string unsignedTransactionEnvelope, string networkPassphrase);
 
         const int JsSignTransactionUserRejectedCode = -9;
 
         public static string address;
         public static NetworkDetails networkDetails;
 
-        public static bool webGL;
-
-        public static WalletManager instance;
+#if UNITY_WEBGL
+        public static bool webGL = true;
+#else
+        public static bool webGL = false;
+#endif
 
         public static bool IsWalletBusy { get; private set; }
         public static event Action<bool> OnWalletBusyChanged;
@@ -100,10 +109,11 @@ namespace StellarWallet
             }
         }
 
-        static TaskCompletionSource<JSResponse> checkWalletTaskSource;
-        static TaskCompletionSource<JSResponse> getAddressTaskSource;
-        static TaskCompletionSource<JSResponse> getNetworkDetailsTaskSource;
-        static TaskCompletionSource<JSResponse> signTransactionTaskSource;
+        // Kept as a static field so the GC never collects the delegate while JS holds its pointer.
+        static readonly WalletResponseCallback s_responseCallback = HandleJsResponse;
+        static int s_nextRequestId;
+        static readonly Dictionary<int, TaskCompletionSource<JSResponse>> s_pendingRequests =
+            new Dictionary<int, TaskCompletionSource<JSResponse>>();
 
         static readonly JsonSerializerSettings jsonSettings = new JsonSerializerSettings()
         {
@@ -111,15 +121,62 @@ namespace StellarWallet
             NullValueHandling = NullValueHandling.Ignore,
         };
 
-        void Awake()
+        static Task<JSResponse> InvokeJs(Action<int, WalletResponseCallback> jsCall)
         {
-            if (instance == null)
-            {
-                instance = this;
-            }
-#if UNITY_WEBGL
-            webGL = true;
+#if UNITY_WEBGL && !UNITY_EDITOR
+            int requestId = Interlocked.Increment(ref s_nextRequestId);
+            TaskCompletionSource<JSResponse> tcs = new TaskCompletionSource<JSResponse>();
+            s_pendingRequests[requestId] = tcs;
+            jsCall(requestId, s_responseCallback);
+            return tcs.Task;
+#else
+            return Task.FromResult(new JSResponse { code = -1, data = "Wallet is only available in WebGL builds" });
 #endif
+        }
+
+        [MonoPInvokeCallback(typeof(WalletResponseCallback))]
+        static void HandleJsResponse(int requestId, int code, IntPtr dataPtr)
+        {
+            try
+            {
+                string data = PtrToStringUtf8(dataPtr);
+                if (s_pendingRequests.TryGetValue(requestId, out TaskCompletionSource<JSResponse> tcs))
+                {
+                    s_pendingRequests.Remove(requestId);
+                    tcs.TrySetResult(new JSResponse { code = code, data = data });
+                }
+                else
+                {
+                    Debug.LogWarning($"WalletManager received a response for unknown requestId {requestId}");
+                }
+            }
+            catch (Exception e)
+            {
+                Debug.LogError($"WalletManager.HandleJsResponse error: {e}");
+            }
+        }
+
+        static string PtrToStringUtf8(IntPtr ptr)
+        {
+            if (ptr == IntPtr.Zero)
+            {
+                return null;
+            }
+
+            int length = 0;
+            while (Marshal.ReadByte(ptr, length) != 0)
+            {
+                length++;
+            }
+
+            if (length == 0)
+            {
+                return string.Empty;
+            }
+
+            byte[] bytes = new byte[length];
+            Marshal.Copy(ptr, bytes, 0, length);
+            return System.Text.Encoding.UTF8.GetString(bytes);
         }
 
         public struct WalletConnection
@@ -224,15 +281,7 @@ namespace StellarWallet
 
         static async Task<WalletResult<bool>> CheckWallet()
         {
-            if (checkWalletTaskSource != null && !checkWalletTaskSource.Task.IsCompleted)
-            {
-                throw new Exception("CheckWallet() is already in progress");
-            }
-
-            checkWalletTaskSource = new TaskCompletionSource<JSResponse>();
-            JSCheckWallet();
-            JSResponse checkWalletRes = await checkWalletTaskSource.Task;
-            checkWalletTaskSource = null;
+            JSResponse checkWalletRes = await InvokeJs((id, cb) => JSCheckWallet(id, cb));
             if (checkWalletRes.code != 1)
             {
                 Debug.Log("CheckWallet() failed with code " + checkWalletRes.code);
@@ -245,15 +294,7 @@ namespace StellarWallet
 
         static async Task<WalletResult<string>> GetAddress(bool isTestnet)
         {
-            if (getAddressTaskSource != null && !getAddressTaskSource.Task.IsCompleted)
-            {
-                throw new Exception("GetAddressFromFreighter() is already in progress");
-            }
-
-            getAddressTaskSource = new TaskCompletionSource<JSResponse>();
-            JSGetFreighterAddress(isTestnet ? "true" : "false");
-            JSResponse getAddressRes = await getAddressTaskSource.Task;
-            getAddressTaskSource = null;
+            JSResponse getAddressRes = await InvokeJs((id, cb) => JSGetFreighterAddress(id, cb, isTestnet ? "true" : "false"));
             if (getAddressRes.code == -2)
             {
                 Debug.Log("GetAddress() failed with code " + getAddressRes.code + " data " + getAddressRes.data);
@@ -272,15 +313,7 @@ namespace StellarWallet
 
         static async Task<WalletResult<string>> GetNetworkDetails()
         {
-            if (getNetworkDetailsTaskSource != null && !getNetworkDetailsTaskSource.Task.IsCompleted)
-            {
-                throw new Exception("GetNetworkDetails() is already in progress");
-            }
-
-            getNetworkDetailsTaskSource = new TaskCompletionSource<JSResponse>();
-            JSGetNetworkDetails();
-            JSResponse getNetworkDetailsRes = await getNetworkDetailsTaskSource.Task;
-            getNetworkDetailsTaskSource = null;
+            JSResponse getNetworkDetailsRes = await InvokeJs((id, cb) => JSGetNetworkDetails(id, cb));
             if (getNetworkDetailsRes.code != 1)
             {
                 Debug.Log("GetNetworkDetails() failed with code " + getNetworkDetailsRes.code);
@@ -293,16 +326,8 @@ namespace StellarWallet
 
         public static async Task<WalletResult<string>> SignTransaction(string unsignedTransactionEnvelope, string networkPassphrase)
         {
-            if (signTransactionTaskSource != null && !signTransactionTaskSource.Task.IsCompleted)
-            {
-                throw new Exception("SignTransaction() is already in progress");
-            }
-
             SetWalletBusy(true);
-            signTransactionTaskSource = new TaskCompletionSource<JSResponse>();
-            JSSignTransaction(unsignedTransactionEnvelope, networkPassphrase);
-            JSResponse signTransactionRes = await signTransactionTaskSource.Task;
-            signTransactionTaskSource = null;
+            JSResponse signTransactionRes = await InvokeJs((id, cb) => JSSignTransaction(id, cb, unsignedTransactionEnvelope, networkPassphrase));
 
             WalletResult<string> result;
             if (signTransactionRes.code == JsSignTransactionUserRejectedCode)
@@ -333,38 +358,6 @@ namespace StellarWallet
 
             SetWalletBusy(false);
             return result;
-        }
-
-        public void StellarResponse(string json)
-        {
-            try
-            {
-                JSResponse response = JsonUtility.FromJson<JSResponse>(json);
-                if (response.code == -666)
-                {
-                    throw new Exception($"StellarResponse() got unspecified error: {response}");
-                }
-
-                TaskCompletionSource<JSResponse> task = response.function switch
-                {
-                    "_JSCheckWallet" => checkWalletTaskSource,
-                    "_JSGetFreighterAddress" => getAddressTaskSource,
-                    "_JSGetNetworkDetails" => getNetworkDetailsTaskSource,
-                    "_JSSignTransaction" => signTransactionTaskSource,
-                    _ => throw new Exception($"StellarResponse() function not found {response}"),
-                };
-                if (task == null)
-                {
-                    throw new Exception($"StellarResponse() task was null: {response}");
-                }
-
-                task.SetResult(response);
-            }
-            catch (Exception e)
-            {
-                Debug.Log($"StellarResponse() unspecified error {e}");
-                throw;
-            }
         }
 
         static string ExtractFreighterErrorMessage(string rawData)
@@ -406,10 +399,8 @@ namespace StellarWallet
         public string sorobanRpcUrl { get; set; }
     }
 
-    [Serializable]
     public class JSResponse
     {
-        public string function;
         public int code;
         public string data;
     }

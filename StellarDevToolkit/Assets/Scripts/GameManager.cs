@@ -72,6 +72,7 @@ public class GameManager : MonoBehaviour
     {
         try
         {
+            StellarClient.EnableLogging = true;
             await InitializeDefaultNetworkContextAsync();
         }
         catch (Exception exception)

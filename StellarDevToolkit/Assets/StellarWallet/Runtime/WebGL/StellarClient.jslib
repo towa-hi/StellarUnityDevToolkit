@@ -1,39 +1,65 @@
 mergeInto(LibraryManager.library, {
-    JSCheckWallet: async function()
+    // Marshals a (requestId, code, data) result back into the static C# callback pointer.
+    $WalletRespond: function (requestId, callback, code, data) {
+        var str = (data === null || data === undefined) ? "" : String(data);
+        var size = lengthBytesUTF8(str) + 1;
+        var ptr = _malloc(size);
+        stringToUTF8(str, ptr, size);
+        // #region agent log
+        try {
+            fetch('http://127.0.0.1:7532/ingest/d6cddc79-b52b-4cf0-a18c-440d158ba1e4',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'2bf4d9'},body:JSON.stringify({sessionId:'2bf4d9',runId:'pkg-loader',hypothesisId:'E',location:'StellarClient.jslib:WalletRespond',message:'invoking C# callback',data:{requestId:requestId,code:code},timestamp:Date.now()})}).catch(function(){});
+        } catch (e) {}
+        // #endregion
+        {{{ makeDynCall('viii', 'callback') }}}(requestId, code, ptr);
+        _free(ptr);
+    },
+
+    JSCheckWallet__deps: ['$WalletRespond'],
+    JSCheckWallet: async function(requestId, callback)
     {
         try {
+            // Ensure the package-loaded Freighter API has finished loading.
+            if (Module.StellarWalletFreighterReady && typeof Module.StellarWalletFreighterReady.then === "function") {
+                await Module.StellarWalletFreighterReady;
+            }
+            // #region agent log
+            try {
+                fetch('http://127.0.0.1:7532/ingest/d6cddc79-b52b-4cf0-a18c-440d158ba1e4',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'2bf4d9'},body:JSON.stringify({sessionId:'2bf4d9',runId:'pkg-loader',hypothesisId:'C',location:'StellarClient.jslib:JSCheckWallet',message:'JSCheckWallet after awaiting loader',data:{hasFreighterApi:!!window.freighterApi,freighterApiType:typeof window.freighterApi},timestamp:Date.now()})}).catch(function(){});
+            } catch (e) {}
+            // #endregion
             const FreighterApi = window.freighterApi;
             if (!FreighterApi) {
-                Module.SendUnityMessage("_JSCheckWallet", -1, `JSCheckWallet() failed because Freighter API not detected.`);
+                WalletRespond(requestId, callback, -1, `JSCheckWallet() failed because Freighter API not detected.`);
                 return;
             }
             const isConnectedRes = await FreighterApi.isConnected();
             if (isConnectedRes && isConnectedRes.error)
             {
-                Module.SendUnityMessage("_JSCheckWallet", -2, `JSCheckWallet() isConnectedRes error: ${JSON.stringify(isConnectedRes)}`);
+                WalletRespond(requestId, callback, -2, `JSCheckWallet() isConnectedRes error: ${JSON.stringify(isConnectedRes)}`);
                 return;
             }
             console.log("isConnected res: ", isConnectedRes);
             const isConnected = (isConnectedRes && isConnectedRes.isConnected) || false;
             if (!isConnected) {
-                Module.SendUnityMessage("_JSCheckWallet", -3, `JSCheckWallet() failed because isConnected false`);
+                WalletRespond(requestId, callback, -3, `JSCheckWallet() failed because isConnected false`);
                 return;
             }
-            Module.SendUnityMessage("_JSCheckWallet", 1, `JSCheckWallet() success`);
+            WalletRespond(requestId, callback, 1, `JSCheckWallet() success`);
             return;
         } catch (e) {
             console.error("JSCheckWallet() unspecified error:", e);
-            Module.SendUnityMessage("_JSCheckWallet", -666, (e && e.message) ? e.message : String(e));
+            WalletRespond(requestId, callback, -666, (e && e.message) ? e.message : String(e));
             return;
         }
     },
-    
-    JSGetFreighterAddress: async function(isTestnet)
+
+    JSGetFreighterAddress__deps: ['$WalletRespond'],
+    JSGetFreighterAddress: async function(requestId, callback, isTestnet)
     {
         console.log(UTF8ToString(isTestnet));
         const SDK = window.StellarSdk || window.stellarSdk || window.StellarSDK || window.stellarsdk || window.Stellar;
         if (!SDK) {
-            Module.SendUnityMessage("_JSGetFreighterAddress", -1, `JSGetFreighterAddress() failed because Stellar SDK global not found`);
+            WalletRespond(requestId, callback, -1, `JSGetFreighterAddress() failed because Stellar SDK global not found`);
             return;
         }
         const {Networks} = (SDK.Networks ? SDK : (SDK.networks ? { Networks: SDK.networks } : SDK));
@@ -45,35 +71,37 @@ mergeInto(LibraryManager.library, {
         const FreighterApi = window.freighterApi;
         const getNetworkRes = await FreighterApi.getNetwork();
         if (getNetworkRes.error) {
-            Module.SendUnityMessage("_JSGetFreighterAddress", -1, `JSGetAddress() getNetworkRes error: ${getNetworkRes}`);
+            WalletRespond(requestId, callback, -1, `JSGetAddress() getNetworkRes error: ${getNetworkRes}`);
             return;
         }
         if (getNetworkRes.networkPassphrase !== currentNetwork) {
-            Module.SendUnityMessage("_JSGetFreighterAddress", -2, `JSGetAddress() is on wrong network ${getNetworkRes.networkPassphrase} currentNetwork is ${currentNetwork}`);
+            WalletRespond(requestId, callback, -2, `JSGetAddress() is on wrong network ${getNetworkRes.networkPassphrase} currentNetwork is ${currentNetwork}`);
             return;
         }
         const requestAccessRes = await FreighterApi.requestAccess();
         if (requestAccessRes.error) {
             console.error("requestAccessRes error: ", requestAccessRes.error);
-            Module.SendUnityMessage("_JSGetFreighterAddress", -3, `JSGetAddress() requestAccessRes error: ${requestAccessRes}`);
+            WalletRespond(requestId, callback, -3, `JSGetAddress() requestAccessRes error: ${requestAccessRes}`);
             return;
         }
-        Module.SendUnityMessage("_JSGetFreighterAddress", 1, requestAccessRes.address);
+        WalletRespond(requestId, callback, 1, requestAccessRes.address);
     },
 
-    JSGetNetworkDetails: async function()
+    JSGetNetworkDetails__deps: ['$WalletRespond'],
+    JSGetNetworkDetails: async function(requestId, callback)
     {
         const FreighterApi = window.freighterApi;
         const getNetworkDetailsRes = await FreighterApi.getNetworkDetails();
         if (getNetworkDetailsRes.error) {
-            Module.SendUnityMessage("_JSGetNetworkDetails", -1, `JSGetNetworkDetails() getNetworkDetailsRes error: ${getNetworkDetailsRes}`)
+            WalletRespond(requestId, callback, -1, `JSGetNetworkDetails() getNetworkDetailsRes error: ${getNetworkDetailsRes}`);
             return;
         }
         const resultString = JSON.stringify(getNetworkDetailsRes);
-        Module.SendUnityMessage("_JSGetNetworkDetails", 1, resultString);
+        WalletRespond(requestId, callback, 1, resultString);
     },
-    
-    JSSignTransaction: async function(unsignedTransactionEnvelope, passphrase)
+
+    JSSignTransaction__deps: ['$WalletRespond'],
+    JSSignTransaction: async function(requestId, callback, unsignedTransactionEnvelope, passphrase)
     {
         try {
             const FreighterApi = window.freighterApi;
@@ -97,16 +125,16 @@ mergeInto(LibraryManager.library, {
                 }
                 const responseCode = userRejected ? -9 : -1;
                 console.error("JSSignTransaction() failed to sign error: ", error);
-                Module.SendUnityMessage("_JSSignTransaction", responseCode, serializedError);
+                WalletRespond(requestId, callback, responseCode, serializedError);
                 return;
             }
-            Module.SendUnityMessage("_JSSignTransaction", 1, signTransactionRes.signedTxXdr);
+            WalletRespond(requestId, callback, 1, signTransactionRes.signedTxXdr);
             return;
         }
         catch (e)
         {
             console.error("JSSignTransaction() unspecified error: ", e);
-            Module.SendUnityMessage("_JSSignTransaction", -666, (e && e.message) ? e.message : String(e));
+            WalletRespond(requestId, callback, -666, (e && e.message) ? e.message : String(e));
             return;
         }
     }

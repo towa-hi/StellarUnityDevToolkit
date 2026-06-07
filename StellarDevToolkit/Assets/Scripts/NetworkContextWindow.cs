@@ -4,6 +4,7 @@ using UnityEngine.UI;
 using StellarSDK;
 using Stellar;
 using System;
+using System.Threading.Tasks;
 
 public class NetworkContextWindow : MonoBehaviour
 {
@@ -24,6 +25,9 @@ public class NetworkContextWindow : MonoBehaviour
     string originalAssetIssuerAddress;
     string originalAssetCode;
 
+    NetworkContext currentContext;
+    bool walletConnected;
+
     static readonly Color invalidColor = new Color(1f, 0.4f, 0.4f);
     static readonly Color validColor = Color.white;
 
@@ -39,21 +43,47 @@ public class NetworkContextWindow : MonoBehaviour
 
     void OnPrivateKeyChanged()
     {
+        if (walletConnected)
+        {
+            UpdateSaveButton();
+            return;
+        }
+
         bool valid = Stellar.Utilities.StrKey.IsValidEd25519SecretSeed(privateKeyInputField.text);
         publicAddressInputField.text = valid ? MuxedAccount.FromSecretSeed(privateKeyInputField.text).AccountId : "INVALID PRIVATE KEY";
-        Debug.Log(publicAddressInputField.text);
         UpdateSaveButton();
     }
 
     public void PopulateNetworkContext(NetworkContext networkContext)
     {
         Debug.Log("Populating network context: " + networkContext.serverUri);
-        serverUriInputField.text = networkContext.serverUri;
-        privateKeyInputField.text = networkContext.userAccount.SecretSeed ?? string.Empty;
-        publicAddressInputField.text = networkContext.userAccount.AccountId;
-        contractAddressInputField.text = networkContext.contractAddress;
-        assetIssuerAddressInputField.text = networkContext.assetIssuerAddress;
-        assetCodeInputField.text = networkContext.assetCode;
+        currentContext = networkContext;
+        walletConnected = networkContext.signingMethod == NetworkContext.SigningMethod.UnityWallet;
+
+        serverUriInputField.SetTextWithoutNotify(networkContext.serverUri);
+
+        if (walletConnected)
+        {
+            privateKeyInputField.SetTextWithoutNotify(string.Empty);
+            privateKeyInputField.interactable = false;
+            privateKeyInputField.readOnly = true;
+        }
+        else
+        {
+            privateKeyInputField.SetTextWithoutNotify(networkContext.userAccount.SecretSeed ?? string.Empty);
+            privateKeyInputField.interactable = true;
+            privateKeyInputField.readOnly = false;
+        }
+
+        if (privateKeyInputField.placeholder is TMP_Text privateKeyPlaceholder)
+        {
+            privateKeyPlaceholder.text = walletConnected ? "Managed by connected wallet" : "Enter private key";
+        }
+
+        publicAddressInputField.SetTextWithoutNotify(networkContext.userAccount.AccountId);
+        contractAddressInputField.SetTextWithoutNotify(networkContext.contractAddress);
+        assetIssuerAddressInputField.SetTextWithoutNotify(networkContext.assetIssuerAddress);
+        assetCodeInputField.SetTextWithoutNotify(networkContext.assetCode);
         assetsHeldText.text = "0";
 
         originalServerUri = serverUriInputField.text;
@@ -62,11 +92,7 @@ public class NetworkContextWindow : MonoBehaviour
         originalAssetIssuerAddress = assetIssuerAddressInputField.text;
         originalAssetCode = assetCodeInputField.text;
 
-        if (networkContext.signingMethod == NetworkContext.SigningMethod.PrivateKey)
-        {
-            OnPrivateKeyChanged();
-        }
-
+        UpdateSaveButton();
         saveButton.interactable = false;
     }
 
@@ -83,7 +109,7 @@ public class NetworkContextWindow : MonoBehaviour
 
         bool serverUriValid = Uri.TryCreate(serverUriInputField.text, UriKind.Absolute, out Uri uri)
             && (uri.Scheme == "https" || uri.Scheme == "http");
-        bool privateKeyValid = Stellar.Utilities.StrKey.IsValidEd25519SecretSeed(privateKeyInputField.text);
+        bool privateKeyValid = walletConnected || Stellar.Utilities.StrKey.IsValidEd25519SecretSeed(privateKeyInputField.text);
         bool contractAddressValid = Stellar.Utilities.StrKey.IsValidContractId(contractAddressInputField.text);
         bool assetIssuerAddressValid = Stellar.Utilities.StrKey.IsValidEd25519PublicKey(assetIssuerAddressInputField.text);
         bool assetCodeValid = !string.IsNullOrEmpty(assetCodeInputField.text) && assetCodeInputField.text.Length <= 12;
@@ -115,14 +141,32 @@ public class NetworkContextWindow : MonoBehaviour
 
     public void SaveNetworkContext()
     {
+        NetworkContext.SigningMethod signingMethod;
+        MuxedAccount account;
+        Func<string, string, Task<Result<string>>> signer;
+
+        if (walletConnected)
+        {
+            signingMethod = NetworkContext.SigningMethod.UnityWallet;
+            account = currentContext.userAccount;
+            signer = currentContext.unityWalletSigner;
+        }
+        else
+        {
+            signingMethod = NetworkContext.SigningMethod.PrivateKey;
+            account = MuxedAccount.FromSecretSeed(privateKeyInputField.text);
+            signer = null;
+        }
+
         NetworkContext newNetworkContext = new NetworkContext(
-            true, NetworkContext.SigningMethod.PrivateKey, MuxedAccount.FromSecretSeed(privateKeyInputField.text), true,
+            true, signingMethod, account, true,
             serverUriInputField.text,
             contractAddressInputField.text,
             assetIssuerAddressInputField.text,
             assetCodeInputField.text,
             1000,
-            30);
+            30,
+            signer);
         GameManager.Instance.SetNetworkContext(newNetworkContext);
     }
 

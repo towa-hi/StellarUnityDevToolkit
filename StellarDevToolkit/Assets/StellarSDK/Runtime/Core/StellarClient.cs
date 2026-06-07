@@ -191,9 +191,9 @@ namespace StellarSDK
             SimulateTransactionResult simulateTransactionResult = result.Value;
             if (simulateTransactionResult.Error != null)
             {
-                Debug.LogError($"SimulateContractFunction {functionName} failed simulation payload: {JsonConvert.SerializeObject(simulateTransactionResult, jsonSettings)}");
+                Debug.LogError($"SimulateContractFunction {functionName} failed simulation: {simulateTransactionResult.Error}");
                 StatusCode code = HasContractError(simulateTransactionResult) ? StatusCode.CONTRACT_ERROR : StatusCode.SIMULATION_FAILED;
-                return Result<(Transaction, SimulateTransactionResult)>.Err(code, (invokeContractTransaction, simulateTransactionResult), $"SimulateContractFunction {functionName} failed because the simulation result was not successful");
+                return Result<(Transaction, SimulateTransactionResult)>.Err(code, (invokeContractTransaction, simulateTransactionResult), $"SimulateContractFunction {functionName} failed: {simulateTransactionResult.Error}");
             }
             return Result<(Transaction, SimulateTransactionResult)>.Ok((invokeContractTransaction, simulateTransactionResult));
         }
