@@ -1,0 +1,14 @@
+<linker>
+  <!--
+    IL2CPP/WebGL managed code stripping removes members that are only ever
+    accessed via reflection. Newtonsoft.Json (de)serialization relies on
+    reflection over the RPC DTOs, so without these rules the WebGL build can
+    emit malformed JSON or throw ArgumentNullException ("method") even though
+    the Editor (Mono, no stripping) works fine.
+  -->
+  <assembly fullname="Newtonsoft.Json" preserve="all"/>
+
+  <assembly fullname="StellarSDK.Runtime">
+    <type fullname="Stellar.RPC.*" preserve="all"/>
+  </assembly>
+</linker>

@@ -2,12 +2,23 @@
   "name": "com.scryingstone.stellar-sdk",
   "version": "0.1.0",
   "displayName": "Stellar Unity SDK",
-  "description": "Interface with Stellar smart contracts from Unity",
-  "unity": "2022.3",
+  "description": "A Unity SDK for the Stellar network and Soroban smart contracts. Provides XDR serialization, a JSON-RPC client, transaction building, and contract invocation, with WebGL/IL2CPP support.",
+  "unity": "6000.0",
   "dependencies": {
     "com.unity.nuget.newtonsoft-json": "3.2.2"
   },
+  "keywords": [
+    "stellar",
+    "soroban",
+    "blockchain",
+    "xdr",
+    "rpc",
+    "smart-contracts"
+  ],
   "author": {
     "name": "Scrying Stone"
-  }
+  },
+  "documentationUrl": "https://github.com/Scrying-Stone/stellar-unity-packages/tree/main/com.scryingstone.stellar-sdk",
+  "changelogUrl": "https://github.com/Scrying-Stone/stellar-unity-packages/blob/main/com.scryingstone.stellar-sdk/CHANGELOG.md",
+  "licensesUrl": "https://github.com/Scrying-Stone/stellar-unity-packages/blob/main/com.scryingstone.stellar-sdk/LICENSE.md"
 }
