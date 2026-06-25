@@ -9,6 +9,14 @@
       },
       "hash": "fd8ff1fb700caf062eb5cce364c1d0a85f99ebe6"
     },
+    "com.scryingstone.stellar-wallet": {
+      "version": "file:com.scryingstone.stellar-wallet",
+      "depth": 0,
+      "source": "embedded",
+      "dependencies": {
+        "com.unity.nuget.newtonsoft-json": "3.2.2"
+      }
+    },
     "com.unity.ai.navigation": {
       "version": "2.0.4",
       "depth": 0,
