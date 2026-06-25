@@ -2,12 +2,22 @@
   "name": "com.scryingstone.stellar-wallet",
   "version": "0.1.0",
   "displayName": "Stellar Unity Wallet",
-  "description": "Freighter wallet integration for Unity WebGL",
-  "unity": "2022.3",
+  "description": "Freighter browser-wallet integration for Unity WebGL: detect the wallet, fetch network details, and sign Stellar transactions. Designed to pair with the Stellar Unity SDK, but does not depend on it.",
+  "unity": "6000.0",
   "dependencies": {
     "com.unity.nuget.newtonsoft-json": "3.2.2"
   },
+  "keywords": [
+    "stellar",
+    "freighter",
+    "wallet",
+    "webgl",
+    "blockchain"
+  ],
   "author": {
     "name": "Scrying Stone"
-  }
+  },
+  "documentationUrl": "https://github.com/Scrying-Stone/stellar-unity-packages/tree/main/com.scryingstone.stellar-wallet",
+  "changelogUrl": "https://github.com/Scrying-Stone/stellar-unity-packages/blob/main/com.scryingstone.stellar-wallet/CHANGELOG.md",
+  "licensesUrl": "https://github.com/Scrying-Stone/stellar-unity-packages/blob/main/com.scryingstone.stellar-wallet/LICENSE.md"
 }
