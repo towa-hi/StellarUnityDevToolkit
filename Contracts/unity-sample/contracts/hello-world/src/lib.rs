@@ -6,6 +6,13 @@ use soroban_sdk::{*};
 pub enum Error {
     InvalidArgs = 1,
     AlreadyExists = 2,
+    NotInitialized = 3,
+    AlreadyInitialized = 4,
+    ListingNotFound = 5,
+    ListingInactive = 6,
+    NotSeller = 7,
+    PaymentTokenNotAllowed = 8,
+    CollectionNotAllowed = 9,
 }
 
 #[contracttype]
@@ -28,6 +35,42 @@ pub struct Inventory {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum DataKey {
     Player(Address),
+    Admin,
+    PaymentTokens,
+    NftCollections,
+    NextListingId,
+    Listing(u32),
+    ActiveListings,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MarketSellReq {
+    pub seller: Address,
+    pub asset_contract: Address,
+    pub asset_id: u32,
+    pub price: u32,
+    pub payment_token: Address,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Listing {
+    pub id: u32,
+    pub seller: Address,
+    pub asset_contract: Address,
+    pub asset_id: u32,
+    pub price: u32,
+    pub payment_token: Address,
+    pub active: bool,
+}
+
+// Minimal client for the OpenZeppelin non-fungible token (SEP-50) contract so we
+// can cross-call it without importing the OZ crate.
+#[contractclient(name = "NftClient")]
+pub trait Nft {
+    fn transfer(e: Env, from: Address, to: Address, token_id: u32);
+    fn owner_of(e: Env, token_id: u32) -> Address;
 }
 
 #[contract]
@@ -53,6 +96,187 @@ impl Contract {
         persistent.set(&player_key, &player);
         Ok(player)
     }
+
+    // --- Marketplace ---
+
+    // Configure the admin plus the allowlists of acceptable payment tokens and
+    // NFT collections. Can only be set once, and requires the admin's
+    // authorization so the allowlists cannot be silently hijacked.
+    pub fn init_market(
+        e: &Env,
+        admin: Address,
+        payment_tokens: Vec<Address>,
+        nft_collections: Vec<Address>,
+    ) -> Result<(), Error> {
+        let instance = e.storage().instance();
+        if instance.has(&DataKey::Admin) {
+            return Err(Error::AlreadyInitialized);
+        }
+        admin.require_auth();
+        instance.set(&DataKey::Admin, &admin);
+        instance.set(&DataKey::PaymentTokens, &payment_tokens);
+        instance.set(&DataKey::NftCollections, &nft_collections);
+        Ok(())
+    }
+
+    // List an NFT for sale. The asset is escrowed into this contract until the
+    // listing is bought or cancelled.
+    pub fn list(e: &Env, req: MarketSellReq) -> Result<u32, Error> {
+        if !e.storage().instance().has(&DataKey::Admin) {
+            return Err(Error::NotInitialized);
+        }
+        if !Self::is_allowed(e, &DataKey::NftCollections, &req.asset_contract) {
+            return Err(Error::CollectionNotAllowed);
+        }
+        if !Self::is_allowed(e, &DataKey::PaymentTokens, &req.payment_token) {
+            return Err(Error::PaymentTokenNotAllowed);
+        }
+        req.seller.require_auth();
+
+        // Effects: record the listing before the external escrow transfer.
+        let id = Self::next_listing_id(e);
+        let listing = Listing {
+            id,
+            seller: req.seller.clone(),
+            asset_contract: req.asset_contract.clone(),
+            asset_id: req.asset_id,
+            price: req.price,
+            payment_token: req.payment_token.clone(),
+            active: true,
+        };
+        e.storage().persistent().set(&DataKey::Listing(id), &listing);
+
+        let mut active = Self::active_listing_ids(e);
+        active.push_back(id);
+        e.storage().instance().set(&DataKey::ActiveListings, &active);
+
+        // Interaction: pull the NFT into escrow.
+        NftClient::new(e, &req.asset_contract).transfer(
+            &req.seller,
+            &e.current_contract_address(),
+            &req.asset_id,
+        );
+
+        Ok(id)
+    }
+
+    // Buy a listed NFT: pay the seller in the payment token, then release the
+    // escrowed NFT to the buyer.
+    pub fn buy(e: &Env, buyer: Address, listing_id: u32) -> Result<(), Error> {
+        buyer.require_auth();
+
+        let mut listing: Listing = e
+            .storage()
+            .persistent()
+            .get(&DataKey::Listing(listing_id))
+            .ok_or(Error::ListingNotFound)?;
+        if !listing.active {
+            return Err(Error::ListingInactive);
+        }
+
+        // Effects: close the listing before any external transfer so a malicious
+        // counterparty contract cannot re-enter and buy it twice.
+        listing.active = false;
+        e.storage().persistent().set(&DataKey::Listing(listing_id), &listing);
+        Self::remove_active(e, listing_id);
+
+        // Interactions: charge the buyer in the listing's payment token, then
+        // release the escrowed NFT.
+        token::Client::new(e, &listing.payment_token).transfer(
+            &buyer,
+            &listing.seller,
+            &(listing.price as i128),
+        );
+
+        NftClient::new(e, &listing.asset_contract).transfer(
+            &e.current_contract_address(),
+            &buyer,
+            &listing.asset_id,
+        );
+
+        Ok(())
+    }
+
+    // Cancel a listing and return the escrowed NFT to the seller.
+    pub fn cancel(e: &Env, listing_id: u32) -> Result<(), Error> {
+        let mut listing: Listing = e
+            .storage()
+            .persistent()
+            .get(&DataKey::Listing(listing_id))
+            .ok_or(Error::ListingNotFound)?;
+        if !listing.active {
+            return Err(Error::ListingInactive);
+        }
+        listing.seller.require_auth();
+
+        // Effects: close the listing before returning the escrowed NFT.
+        listing.active = false;
+        e.storage().persistent().set(&DataKey::Listing(listing_id), &listing);
+        Self::remove_active(e, listing_id);
+
+        // Interaction: return the escrowed NFT to the seller.
+        NftClient::new(e, &listing.asset_contract).transfer(
+            &e.current_contract_address(),
+            &listing.seller,
+            &listing.asset_id,
+        );
+
+        Ok(())
+    }
+
+    pub fn get_listing(e: &Env, listing_id: u32) -> Option<Listing> {
+        e.storage().persistent().get(&DataKey::Listing(listing_id))
+    }
+
+    pub fn get_listings(e: &Env) -> Vec<Listing> {
+        let active = Self::active_listing_ids(e);
+        let mut out = Vec::new(e);
+        for id in active.iter() {
+            if let Some(listing) = e
+                .storage()
+                .persistent()
+                .get::<DataKey, Listing>(&DataKey::Listing(id))
+            {
+                out.push_back(listing);
+            }
+        }
+        out
+    }
+
+    fn is_allowed(e: &Env, key: &DataKey, addr: &Address) -> bool {
+        let allowlist: Vec<Address> = e
+            .storage()
+            .instance()
+            .get(key)
+            .unwrap_or_else(|| Vec::new(e));
+        allowlist.iter().any(|a| &a == addr)
+    }
+
+    fn next_listing_id(e: &Env) -> u32 {
+        let instance = e.storage().instance();
+        let id: u32 = instance.get(&DataKey::NextListingId).unwrap_or(0);
+        instance.set(&DataKey::NextListingId, &(id + 1));
+        id
+    }
+
+    fn active_listing_ids(e: &Env) -> Vec<u32> {
+        e.storage()
+            .instance()
+            .get(&DataKey::ActiveListings)
+            .unwrap_or_else(|| Vec::new(e))
+    }
+
+    fn remove_active(e: &Env, listing_id: u32) {
+        let active = Self::active_listing_ids(e);
+        let mut next = Vec::new(e);
+        for id in active.iter() {
+            if id != listing_id {
+                next.push_back(id);
+            }
+        }
+        e.storage().instance().set(&DataKey::ActiveListings, &next);
+    }
+
     // --- Primitive round-trips ---
 
     pub fn echo_u32(_e: &Env, val: u32) -> u32 {

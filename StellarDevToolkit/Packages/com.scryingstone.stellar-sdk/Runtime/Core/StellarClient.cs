@@ -15,9 +15,27 @@ using UnityEngine.Networking;
 
 namespace StellarSDK
 {
+    public sealed class SentTransactionInfo
+    {
+        /// <summary>Raw sendTransaction response (contains the hash).</summary>
+        public SendTransactionResult SendResult;
+        /// <summary>Contract function name if a contract function was invoked, otherwise the operation type name.</summary>
+        public string OperationLabel;
+        /// <summary>Invoked contract address (C...) if a contract function was invoked, otherwise null.</summary>
+        public string ContractAddress;
+        /// <summary>Total fee set on the submitted transaction (stroops), including resource fees.</summary>
+        public uint EstimatedFeeStroops;
+    }
+
     public static class StellarClient
     {
         public static bool EnableLogging;
+
+        /// <summary>
+        /// Raised after a transaction is successfully accepted by the network
+        /// (sendTransaction returned without an error result).
+        /// </summary>
+        public static event Action<SentTransactionInfo> OnTransactionSent;
 
         static void DebugLog(string message)
         {
@@ -764,7 +782,59 @@ namespace StellarSDK
                 return Result<SendTransactionResult>.Err(result);
             }
             SendTransactionResult transactionResult = result.Value;
+            if (transactionResult is { ErrorResult: null })
+            {
+                OnTransactionSent?.Invoke(BuildSentTransactionInfo(parameters?.Transaction, transactionResult));
+            }
             return Result<SendTransactionResult>.Ok(transactionResult);
+        }
+
+        static SentTransactionInfo BuildSentTransactionInfo(string envelopeXdr, SendTransactionResult sendResult)
+        {
+            SentTransactionInfo info = new()
+            {
+                SendResult = sendResult,
+                OperationLabel = "Transaction",
+            };
+            try
+            {
+                // This SDK only produces v1 envelopes (see EncodeTransaction).
+                if (TransactionEnvelopeXdr.DecodeFromBase64(envelopeXdr) is not TransactionEnvelope.EnvelopeTypeTx envelope)
+                {
+                    return info;
+                }
+
+                Operation.bodyUnion body = envelope.v1?.tx?.operations?.FirstOrDefault()?.body;
+                if (envelope.v1?.tx?.fee != null)
+                {
+                    info.EstimatedFeeStroops = envelope.v1.tx.fee.InnerValue;
+                }
+
+                if (body == null)
+                {
+                    return info;
+                }
+
+                if (body is Operation.bodyUnion.InvokeHostFunction invoke
+                    && invoke.invokeHostFunctionOp?.hostFunction is HostFunction.HostFunctionTypeInvokeContract invokeContract)
+                {
+                    info.OperationLabel = invokeContract.invokeContract?.functionName?.InnerValue ?? "InvokeContract";
+                    if (invokeContract.invokeContract?.contractAddress is SCAddress.ScAddressTypeContract contract)
+                    {
+                        info.ContractAddress = StrKey.EncodeContractId(contract.contractId.InnerValue);
+                    }
+                }
+                else
+                {
+                    // Case class names match the operation, e.g. Payment, CreateAccount, InvokeHostFunction.
+                    info.OperationLabel = body.GetType().Name;
+                }
+            }
+            catch (Exception exception)
+            {
+                DebugLog($"BuildSentTransactionInfo: failed to inspect envelope: {exception.Message}");
+            }
+            return info;
         }
 
         public static async Task<Result<GetEventsResult>> GetEventsAsync(NetworkContext context, GetEventsParams parameters, StellarClientTask task = null)

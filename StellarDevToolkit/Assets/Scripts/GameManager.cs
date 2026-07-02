@@ -3,6 +3,7 @@ using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using Stellar;
+using Stellar.RPC;
 using StellarSDK;
 using StellarWallet;
 
@@ -26,6 +27,8 @@ public class GameManager : MonoBehaviour
     public TestWindow testWindow;
     public AssetModal assetModal;
     public SendModal sendModal;
+
+    public TransactionTracker transactionTracker;
     void Awake()
     {
         if (Instance == null)
@@ -50,6 +53,7 @@ public class GameManager : MonoBehaviour
         clientTask.OnStepStarted += HandleClientStepStarted;
         clientTask.OnStepEnded += HandleClientStepEnded;
         clientTask.OnBusyChanged += HandleClientBusyChanged;
+        StellarClient.OnTransactionSent += HandleTransactionSent;
         if (communicationDiagram != null)
         {
             communicationDiagram.SetTask(clientTask);
@@ -58,6 +62,8 @@ public class GameManager : MonoBehaviour
 
     void OnDisable()
     {
+        StellarClient.OnTransactionSent -= HandleTransactionSent;
+
         if (clientTask == null)
         {
             return;
@@ -94,6 +100,28 @@ public class GameManager : MonoBehaviour
     void HandleClientBusyChanged(bool busy)
     {
         Debug.Log($"[StellarClient] Busy: {busy}");
+    }
+
+    void HandleTransactionSent(SentTransactionInfo info)
+    {
+        if (transactionTracker == null)
+        {
+            return;
+        }
+
+        string network = context.isTestnet ? "testnet" : "public";
+        string transactionUrl = $"https://stellar.expert/explorer/{network}/tx/{info.SendResult.Hash}";
+        string contractUrl = info.ContractAddress != null
+            ? $"https://stellar.expert/explorer/{network}/contract/{info.ContractAddress}"
+            : null;
+        transactionTracker.AddEntry(
+            DateTime.Now.ToString("HH:mm:ss"),
+            info.OperationLabel,
+            info.ContractAddress,
+            contractUrl,
+            transactionUrl,
+            info.EstimatedFeeStroops,
+            info.SendResult.Hash);
     }
 
     async Task InitializeDefaultNetworkContextAsync()

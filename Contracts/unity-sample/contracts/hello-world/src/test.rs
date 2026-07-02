@@ -1,7 +1,233 @@
 #![cfg(test)]
 
 use super::*;
-use soroban_sdk::{vec, Env, Map, String};
+use soroban_sdk::{testutils::Address as _, token, vec, Address, Env, Map, String};
+
+// Minimal NFT contract used to exercise the marketplace cross-contract calls.
+// Matches the `Nft` client interface (`transfer`, `owner_of`) plus a `mint`.
+mod mock_nft {
+    use soroban_sdk::{contract, contractimpl, contracttype, Address, Env};
+
+    #[contracttype]
+    pub enum NftKey {
+        Owner(u32),
+    }
+
+    #[contract]
+    pub struct MockNft;
+
+    #[contractimpl]
+    impl MockNft {
+        pub fn mint(e: &Env, to: Address, token_id: u32) {
+            e.storage().persistent().set(&NftKey::Owner(token_id), &to);
+        }
+
+        pub fn owner_of(e: &Env, token_id: u32) -> Address {
+            e.storage()
+                .persistent()
+                .get(&NftKey::Owner(token_id))
+                .unwrap()
+        }
+
+        pub fn transfer(e: &Env, from: Address, to: Address, token_id: u32) {
+            from.require_auth();
+            let owner: Address = e
+                .storage()
+                .persistent()
+                .get(&NftKey::Owner(token_id))
+                .unwrap();
+            assert_eq!(owner, from);
+            e.storage().persistent().set(&NftKey::Owner(token_id), &to);
+        }
+    }
+}
+
+struct MarketFixture<'a> {
+    env: Env,
+    market_id: Address,
+    market: ContractClient<'a>,
+    nft_id: Address,
+    nft: mock_nft::MockNftClient<'a>,
+    pay_addr: Address,
+    pay: token::Client<'a>,
+    seller: Address,
+    buyer: Address,
+}
+
+fn setup_market<'a>(price: u32) -> (MarketFixture<'a>, u32) {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let market_id = env.register(Contract, ());
+    let market = ContractClient::new(&env, &market_id);
+
+    let nft_id = env.register(mock_nft::MockNft, ());
+    let nft = mock_nft::MockNftClient::new(&env, &nft_id);
+
+    let token_admin = Address::generate(&env);
+    let sac = env.register_stellar_asset_contract_v2(token_admin);
+    let pay_addr = sac.address();
+    let pay_admin = token::StellarAssetClient::new(&env, &pay_addr);
+    let pay = token::Client::new(&env, &pay_addr);
+
+    let admin = Address::generate(&env);
+    let seller = Address::generate(&env);
+    let buyer = Address::generate(&env);
+
+    market.init_market(
+        &admin,
+        &vec![&env, pay_addr.clone()],
+        &vec![&env, nft_id.clone()],
+    );
+    nft.mint(&seller, &1u32);
+    pay_admin.mint(&buyer, &1_000i128);
+
+    let req = MarketSellReq {
+        seller: seller.clone(),
+        asset_contract: nft_id.clone(),
+        asset_id: 1u32,
+        price,
+        payment_token: pay_addr.clone(),
+    };
+    let listing_id = market.list(&req);
+    assert_eq!(nft.owner_of(&1u32), market_id);
+
+    (
+        MarketFixture {
+            env,
+            market_id,
+            market,
+            nft_id,
+            nft,
+            pay_addr,
+            pay,
+            seller,
+            buyer,
+        },
+        listing_id,
+    )
+}
+
+#[test]
+fn test_market_list_escrows_nft() {
+    let (f, listing_id) = setup_market(100);
+    let listing = f.market.get_listing(&listing_id).unwrap();
+    assert_eq!(listing.seller, f.seller);
+    assert_eq!(listing.asset_contract, f.nft_id);
+    assert_eq!(listing.asset_id, 1u32);
+    assert_eq!(listing.price, 100u32);
+    assert!(listing.active);
+    assert_eq!(f.nft.owner_of(&1u32), f.market_id);
+    assert_eq!(f.market.get_listings().len(), 1);
+}
+
+#[test]
+fn test_market_buy_transfers_payment_and_nft() {
+    let (f, listing_id) = setup_market(100);
+
+    f.market.buy(&f.buyer, &listing_id);
+
+    assert_eq!(f.nft.owner_of(&1u32), f.buyer);
+    assert_eq!(f.pay.balance(&f.seller), 100i128);
+    assert_eq!(f.pay.balance(&f.buyer), 900i128);
+    assert!(!f.market.get_listing(&listing_id).unwrap().active);
+    assert_eq!(f.market.get_listings().len(), 0);
+}
+
+#[test]
+fn test_market_cancel_returns_nft() {
+    let (f, listing_id) = setup_market(100);
+
+    f.market.cancel(&listing_id);
+
+    assert_eq!(f.nft.owner_of(&1u32), f.seller);
+    assert!(!f.market.get_listing(&listing_id).unwrap().active);
+    assert_eq!(f.market.get_listings().len(), 0);
+}
+
+#[test]
+fn test_market_buy_inactive_fails() {
+    let (f, listing_id) = setup_market(100);
+
+    f.market.buy(&f.buyer, &listing_id);
+
+    let result = f.market.try_buy(&f.buyer, &listing_id);
+    assert_eq!(result, Err(Ok(Error::ListingInactive)));
+}
+
+#[test]
+fn test_market_buy_missing_listing_fails() {
+    let (f, _listing_id) = setup_market(100);
+
+    let result = f.market.try_buy(&f.buyer, &999u32);
+    assert_eq!(result, Err(Ok(Error::ListingNotFound)));
+}
+
+#[test]
+fn test_market_init_is_write_once() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let market_id = env.register(Contract, ());
+    let market = ContractClient::new(&env, &market_id);
+
+    let admin = Address::generate(&env);
+    let other = Address::generate(&env);
+    let sac_a = env.register_stellar_asset_contract_v2(Address::generate(&env));
+    let sac_b = env.register_stellar_asset_contract_v2(Address::generate(&env));
+
+    market.init_market(
+        &admin,
+        &vec![&env, sac_a.address()],
+        &vec![&env, Address::generate(&env)],
+    );
+
+    let result = market.try_init_market(
+        &other,
+        &vec![&env, sac_b.address()],
+        &vec![&env, Address::generate(&env)],
+    );
+    assert_eq!(result, Err(Ok(Error::AlreadyInitialized)));
+}
+
+#[test]
+fn test_market_list_rejects_unlisted_collection() {
+    let (f, _listing_id) = setup_market(100);
+
+    // A different NFT contract that is not on the collection allowlist.
+    let other_nft_id = f.env.register(mock_nft::MockNft, ());
+    let other_nft = mock_nft::MockNftClient::new(&f.env, &other_nft_id);
+    other_nft.mint(&f.seller, &7u32);
+
+    let req = MarketSellReq {
+        seller: f.seller.clone(),
+        asset_contract: other_nft_id,
+        asset_id: 7u32,
+        price: 100,
+        payment_token: f.pay_addr.clone(),
+    };
+    let result = f.market.try_list(&req);
+    assert_eq!(result, Err(Ok(Error::CollectionNotAllowed)));
+}
+
+#[test]
+fn test_market_list_rejects_unlisted_payment_token() {
+    let (f, _listing_id) = setup_market(100);
+
+    f.nft.mint(&f.seller, &2u32);
+    // A payment token that is not on the allowlist.
+    let other_sac = f.env.register_stellar_asset_contract_v2(Address::generate(&f.env));
+
+    let req = MarketSellReq {
+        seller: f.seller.clone(),
+        asset_contract: f.nft_id.clone(),
+        asset_id: 2u32,
+        price: 100,
+        payment_token: other_sac.address(),
+    };
+    let result = f.market.try_list(&req);
+    assert_eq!(result, Err(Ok(Error::PaymentTokenNotAllowed)));
+}
 
 #[test]
 fn test_hello() {
