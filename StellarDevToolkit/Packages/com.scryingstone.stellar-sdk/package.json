@@ -1,7 +1,7 @@
 {
   "name": "com.scryingstone.stellar-sdk",
   "version": "0.1.0",
-  "displayName": "Stellar Unity SDK",
+  "displayName": "Stellar Unity Development Toolkit",
   "description": "A Unity SDK for the Stellar network and Soroban smart contracts. Provides XDR serialization, a JSON-RPC client, transaction building, and contract invocation, with WebGL/IL2CPP support.",
   "unity": "6000.0",
   "dependencies": {

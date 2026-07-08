@@ -1,6 +1,6 @@
-# Stellar Unity SDK — Documentation
+# Stellar Unity Development Toolkit — Documentation
 
-The Stellar Unity SDK lets you talk to the Stellar network and Soroban smart
+The Stellar Unity Development Toolkit lets you talk to the Stellar network and Soroban smart
 contracts from C# in Unity: XDR serialization, a Soroban JSON-RPC client,
 transaction building, contract invocation, and Ed25519 signing.
 
@@ -34,10 +34,9 @@ Or import from the Unity Asset Store. The Newtonsoft.Json dependency
 
 Two signing paths are supported:
 
-- `SigningMethod.PrivateKey` — the SDK signs locally with the account's secret.
-- `SigningMethod.UnityWallet` — signing is delegated to an external signer
-  (e.g., the Freighter browser wallet via the separate
-  `com.scryingstone.stellar-wallet` package).
+- `SigningMethod.PrivateKey` — the toolkit signs locally with the account's
+  secret.
+- `SigningMethod.UnityWallet` — signing is delegated to an external signer.
 
 ## WebGL / IL2CPP
 

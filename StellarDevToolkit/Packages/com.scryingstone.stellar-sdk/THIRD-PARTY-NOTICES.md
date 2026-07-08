@@ -1,6 +1,6 @@
 # Third-Party Notices
 
-The Stellar Unity SDK (`com.scryingstone.stellar-sdk`) is licensed under the MIT
+The Stellar Unity Development Toolkit (`com.scryingstone.stellar-sdk`) is licensed under the MIT
 License (see LICENSE.md). It bundles the following third-party components, which
 remain under their own licenses. The precompiled assemblies live in
 `Runtime/Plugins/`.

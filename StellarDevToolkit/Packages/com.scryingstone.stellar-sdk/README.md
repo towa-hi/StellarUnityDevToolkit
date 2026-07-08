@@ -1,13 +1,10 @@
-# Stellar Unity SDK
+# Stellar Unity Development Toolkit
 
-A Unity SDK for the [Stellar](https://stellar.org) network and
-[Soroban](https://soroban.stellar.org) smart contracts. It provides XDR
-serialization, a JSON-RPC client for Soroban RPC, transaction building, and
-contract invocation — all from C# inside Unity, including WebGL/IL2CPP builds.
-
-> This package is the XDR + RPC core. Browser wallet integration (Freighter)
-> lives in a separate package, `com.scryingstone.stellar-wallet`, and is not
-> required to use the SDK.
+The Stellar Unity Development Toolkit brings the [Stellar](https://stellar.org)
+network and [Soroban](https://soroban.stellar.org) smart contracts to Unity. It
+provides XDR serialization, a JSON-RPC client for Soroban RPC, transaction
+building, and contract invocation — all from C# inside Unity, including
+WebGL/IL2CPP builds.
 
 ## Requirements
 
@@ -28,8 +25,8 @@ To pin a version, append a tag, e.g. `#v0.1.0`.
 
 ### Unity Asset Store
 
-Import "Stellar Unity SDK" from your Asset Store **My Assets**, then add it via
-the Package Manager.
+Import "Stellar Unity Development Toolkit" from your Asset Store
+**My Assets**, then add it via the Package Manager.
 
 ## Quick start
 
@@ -70,8 +67,8 @@ public class StellarExample : MonoBehaviour
 ```
 
 See the [sample project](https://github.com/Scrying-Stone/stellar-unity-sample)
-for a complete, runnable example (RPC calls, serialization round-trips, and a
-demo game) and the optional Freighter wallet integration.
+for a complete, runnable example with RPC calls, serialization round-trips, and
+a demo game.
 
 ## Features
 
