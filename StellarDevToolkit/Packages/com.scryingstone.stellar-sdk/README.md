@@ -1,6 +1,6 @@
-# Stellar Unity Development Toolkit
+# Stellar Development Toolkit for Unity
 
-The Stellar Unity Development Toolkit brings the [Stellar](https://stellar.org)
+The Stellar Development Toolkit for Unity brings the [Stellar](https://stellar.org)
 network and [Soroban](https://soroban.stellar.org) smart contracts to Unity. It
 provides XDR serialization, a JSON-RPC client for Soroban RPC, transaction
 building, and contract invocation — all from C# inside Unity, including
@@ -25,7 +25,7 @@ To pin a version, append a tag, e.g. `#v0.1.0`.
 
 ### Unity Asset Store
 
-Import "Stellar Unity Development Toolkit" from your Asset Store
+Import "Stellar Development Toolkit for Unity" from your Asset Store
 **My Assets**, then add it via the Package Manager.
 
 ## Quick start

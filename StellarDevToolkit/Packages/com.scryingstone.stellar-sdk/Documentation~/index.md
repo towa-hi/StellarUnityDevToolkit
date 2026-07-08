@@ -1,6 +1,6 @@
-# Stellar Unity Development Toolkit — Documentation
+# Stellar Development Toolkit for Unity — Documentation
 
-The Stellar Unity Development Toolkit lets you talk to the Stellar network and Soroban smart
+The Stellar Development Toolkit for Unity lets you talk to the Stellar network and Soroban smart
 contracts from C# in Unity: XDR serialization, a Soroban JSON-RPC client,
 transaction building, contract invocation, and Ed25519 signing.
 

@@ -1,9 +1,10 @@
 {
   "name": "com.scryingstone.stellar-sdk",
   "version": "0.1.0",
-  "displayName": "Stellar Unity Development Toolkit",
-  "description": "A Unity SDK for the Stellar network and Soroban smart contracts. Provides XDR serialization, a JSON-RPC client, transaction building, and contract invocation, with WebGL/IL2CPP support.",
+  "displayName": "Stellar Development Toolkit for Unity",
+  "description": "The Stellar Development Toolkit for Unity connects your game or application to the Stellar network and Soroban smart contracts, entirely from C#. It includes a complete JSON-RPC client for Soroban RPC — health checks, ledgers, network info, fee statistics, ledger entries, transactions, and events — plus full XDR serialization and deserialization for Stellar and Soroban data types. Build transactions, simulate and invoke contract functions, and sign locally with Ed25519 keypairs, all through a simple async API that returns explicit success-or-error results.\n\nThe toolkit is designed for Unity from the ground up: no external processes or native binaries, just managed C# that works in the editor and in builds, including WebGL and IL2CPP (a bundled link.xml handles code-stripping automatically, with no extra configuration). Its only dependency, Newtonsoft.Json, is resolved automatically through the Package Manager. Connect to testnet or mainnet with a single configuration struct, and get started quickly with the included documentation and a complete runnable sample project.",
   "unity": "6000.0",
+  "unityRelease": "28f1",
   "dependencies": {
     "com.unity.nuget.newtonsoft-json": "3.2.2"
   },
