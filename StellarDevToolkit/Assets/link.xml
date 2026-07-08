@@ -11,4 +11,8 @@
   <assembly fullname="StellarSDK.Runtime">
     <type fullname="Stellar.RPC.*" preserve="all"/>
   </assembly>
+  <assembly fullname="StellarSDK.Wallet.Runtime">
+    <type fullname="StellarWallet.NetworkDetails" preserve="all"/>
+    <type fullname="StellarWallet.JSResponse" preserve="all"/>
+  </assembly>
 </linker>

@@ -888,6 +888,23 @@ namespace StellarSDK
             return Result<GetTransactionResult>.Ok(result.Value);
         }
 
+        public static async Task<Result<GetLedgersResult>> GetLedgersAsync(NetworkContext context, GetLedgersParams parameters, StellarClientTask task = null)
+        {
+            using var _ = new StellarClientTask.Scope(task, "GetLedgersAsync");
+            var result = await SendJsonRequest<GetLedgersResult>(context, new()
+            {
+                JsonRpc = "2.0",
+                Method = "getLedgers",
+                Params = parameters,
+                Id = 1,
+            });
+            if (result.IsError)
+            {
+                return Result<GetLedgersResult>.Err(result);
+            }
+            return Result<GetLedgersResult>.Ok(result.Value);
+        }
+
         public static async Task<Result<GetTransactionsResult>> GetTransactionsAsync(NetworkContext context, GetTransactionsParams parameters, StellarClientTask task = null)
         {
             using var _ = new StellarClientTask.Scope(task, "GetTransactionsAsync");

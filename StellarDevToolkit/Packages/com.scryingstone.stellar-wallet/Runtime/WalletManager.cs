@@ -390,7 +390,7 @@ namespace StellarWallet
             return trimmed;
         }
     }
-
+    [UnityEngine.Scripting.Preserve]
     public class NetworkDetails
     {
         public string network { get; set; }
@@ -398,7 +398,7 @@ namespace StellarWallet
         public string networkPassphrase { get; set; }
         public string sorobanRpcUrl { get; set; }
     }
-
+    [UnityEngine.Scripting.Preserve]
     public class JSResponse
     {
         public int code;
