@@ -1,0 +1,16 @@
+{
+    "name": "StellarSDK.Samples.Demo",
+    "rootNamespace": "",
+    "references": [
+        "StellarSDK.Runtime"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}
