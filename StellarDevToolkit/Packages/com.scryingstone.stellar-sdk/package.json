@@ -8,6 +8,13 @@
   "dependencies": {
     "com.unity.nuget.newtonsoft-json": "3.2.2"
   },
+  "samples": [
+    {
+      "displayName": "RPC Demo",
+      "description": "Runnable scene that exercises the read-only Soroban RPC endpoints (health, ledgers, network info, fee stats, transactions, and events) against testnet, with pass/fail results shown on screen and in the console.",
+      "path": "Samples/Demo"
+    }
+  ],
   "keywords": [
     "stellar",
     "soroban",

@@ -261,6 +261,10 @@ public class GameManager : MonoBehaviour
     public void StartGame()
     {
         networkUI.gameObject.SetActive(false);
+        if (transactionTracker != null)
+        {
+            transactionTracker.gameObject.SetActive(false);
+        }
         NewGame();
     }
 

@@ -147,6 +147,41 @@ public struct PlacementResolution
     }
 }
 
+public struct IntegerRng
+{
+    public uint State;
+
+    public IntegerRng(uint seed)
+    {
+        State = seed == 0u ? 0x9E3779B9u : seed;
+    }
+
+    public uint NextU32()
+    {
+        uint x = State;
+        if (x == 0u)
+        {
+            x = 0x9E3779B9u;
+        }
+
+        x ^= x << 13;
+        x ^= x >> 17;
+        x ^= x << 5;
+        State = x;
+        return x;
+    }
+
+    public int NextIndex(int count)
+    {
+        if (count <= 0)
+        {
+            return 0;
+        }
+
+        return (int)(NextU32() % (uint)count);
+    }
+}
+
 public class GameController : MonoBehaviour
 {
     public event Action<int, int> ScoreChanged;
@@ -169,11 +204,13 @@ public class GameController : MonoBehaviour
 
     [SerializeField] public GameState State = GameState.NotStarted;
     public int Score = 0;
+    public uint GameSeed { get; private set; }
     int lineClearStreak = 0;
 
     ShapeTray draggedShape = null;
     ShapeOfferSlot draggedFromSlot = null;
     readonly List<Vector2Int> previewCoordsBuffer = new List<Vector2Int>();
+    IntegerRng gameRandom;
 
     void Awake()
     {
@@ -194,22 +231,71 @@ public class GameController : MonoBehaviour
 
     public void StartNewGame()
     {
+        StartNewGame(GenerateNewGameSeed());
+    }
+
+    public void StartNewGame(uint seed)
+    {
         if (board == null)
         {
             Debug.LogWarning("GameController: Cannot start game without Board.", this);
             return;
         }
 
+        GameSeed = seed;
+        gameRandom = new IntegerRng(GameSeed);
+
         CancelActiveDrag();
         board.InitializeBoard(GameUtility.GetBoardSize());
         if (offerArea != null)
         {
-            offerArea.PopulateShapeOfferSlots();
+            offerArea.PopulateShapeOfferSlots(GeneratePackedShapeBatch);
         }
 
         SetScore(0);
         lineClearStreak = 0;
         State = GameState.WaitingForDrag;
+    }
+
+    public int[] GeneratePackedShapeBatch(int count)
+    {
+        int[] batch = new int[Mathf.Max(0, count)];
+        if (batch.Length == 0)
+        {
+            return batch;
+        }
+
+        int trominoSlotIndex = gameRandom.NextIndex(batch.Length);
+        for (int i = 0; i < batch.Length; i++)
+        {
+            int[] sourceShapes = i == trominoSlotIndex
+                ? BlockBlastConstants.TrominoPackedShapes
+                : BlockBlastConstants.TetrominoPackedShapes;
+            batch[i] = PickRandomPackedShape(sourceShapes);
+        }
+
+        return batch;
+    }
+
+    int PickRandomPackedShape(int[] packedShapes)
+    {
+        if (packedShapes == null || packedShapes.Length == 0)
+        {
+            packedShapes = BlockBlastConstants.TetrominoPackedShapes;
+        }
+
+        if (packedShapes == null || packedShapes.Length == 0)
+        {
+            return 0;
+        }
+
+        return packedShapes[gameRandom.NextIndex(packedShapes.Length)];
+    }
+
+    static uint GenerateNewGameSeed()
+    {
+        uint seed = unchecked((uint)(Environment.TickCount ^ Guid.NewGuid().GetHashCode()));
+        return seed == 0u ? 1u : seed;
     }
 
     public void SetState(GameState state)
@@ -225,6 +311,11 @@ public class GameController : MonoBehaviour
     public bool TryBeginDrag(ShapeOfferSlot sourceSlot)
     {
         if (State == GameState.GameOver || sourceSlot == null || !sourceSlot.HasShape())
+        {
+            return false;
+        }
+
+        if (offerArea != null && !offerArea.CanBeginDragFrom(sourceSlot))
         {
             return false;
         }

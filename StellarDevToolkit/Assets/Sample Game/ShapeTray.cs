@@ -1,5 +1,6 @@
 using UnityEngine;
 using System.Collections.Generic;
+using DG.Tweening;
 
 public class ShapeTray : MonoBehaviour
 {
@@ -29,6 +30,7 @@ public class ShapeTray : MonoBehaviour
     readonly Dictionary<Renderer, Color> rendererBaseColors = new Dictionary<Renderer, Color>();
     MaterialPropertyBlock alphaPropertyBlock = null;
     Vector3 fullScale = Vector3.one;
+    Tween slotPoseTween = null;
 
     void Awake()
     {
@@ -77,6 +79,7 @@ public class ShapeTray : MonoBehaviour
 
     public void SnapToSlotPose()
     {
+        KillSlotPoseTween();
         Transform slotAnchor = OwnerSlot != null ? OwnerSlot.GetSlotAnchor() : transform.parent;
         if (slotAnchor == null)
         {
@@ -86,12 +89,38 @@ public class ShapeTray : MonoBehaviour
         transform.SetParent(slotAnchor, false);
         transform.localPosition = Vector3.zero;
         transform.localRotation = Quaternion.identity;
-        transform.localScale = fullScale * slotScaleMultiplier;
+        transform.localScale = GetTargetSlotScale();
         SetAlpha(idleAlpha);
+    }
+
+    public Tween LerpToSlotPose(float duration)
+    {
+        KillSlotPoseTween();
+        Transform slotAnchor = OwnerSlot != null ? OwnerSlot.GetSlotAnchor() : transform.parent;
+        if (slotAnchor == null)
+        {
+            return null;
+        }
+
+        if (duration <= 0.0f)
+        {
+            SnapToSlotPose();
+            return null;
+        }
+
+        transform.SetParent(slotAnchor, true);
+        slotPoseTween = DOTween.Sequence()
+            .Join(transform.DOLocalMove(Vector3.zero, duration))
+            .Join(transform.DOLocalRotateQuaternion(Quaternion.identity, duration))
+            .Join(transform.DOScale(GetTargetSlotScale(), duration))
+            .SetEase(Ease.OutCubic)
+            .SetLink(gameObject);
+        return slotPoseTween;
     }
 
     public void EnterDragVisualState()
     {
+        KillSlotPoseTween();
         transform.localScale = fullScale;
         SetAlpha(dragAlpha);
     }
@@ -152,6 +181,27 @@ public class ShapeTray : MonoBehaviour
     public bool TryGetTile(Vector2Int localCoord, out Tile tile)
     {
         return tilesByLocalCoord.TryGetValue(localCoord, out tile);
+    }
+
+    void OnDisable()
+    {
+        KillSlotPoseTween();
+    }
+
+    Vector3 GetTargetSlotScale()
+    {
+        float ownerMultiplier = OwnerSlot != null ? OwnerSlot.ShapeScaleMultiplier : 1.0f;
+        return fullScale * slotScaleMultiplier * ownerMultiplier;
+    }
+
+    void KillSlotPoseTween()
+    {
+        if (slotPoseTween != null && slotPoseTween.IsActive())
+        {
+            slotPoseTween.Kill();
+        }
+
+        slotPoseTween = null;
     }
 
     void CacheRenderers()

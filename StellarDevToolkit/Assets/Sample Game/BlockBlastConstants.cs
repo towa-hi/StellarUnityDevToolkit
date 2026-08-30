@@ -29,6 +29,25 @@ public static class BlockBlastConstants
     public const int TetrominoLDown = 14400;
     public const int TetrominoLLeft = 200832;
 
+    // 5x5 footprint bitmasks for centered trominoes (all unique rotations).
+    public const int TrominoIHorizontal = 14336;
+    public const int TrominoIVertical = 135296;
+
+    public const int TrominoLUp = 143360;
+    public const int TrominoLRight = 12416;
+    public const int TrominoLDown = 6272;
+    public const int TrominoLLeft = 137216;
+
+    public static readonly int[] TrominoPackedShapes =
+    {
+        TrominoIHorizontal,
+        TrominoIVertical,
+        TrominoLUp,
+        TrominoLRight,
+        TrominoLDown,
+        TrominoLLeft
+    };
+
     public static readonly int[] TetrominoPackedShapes =
     {
         TetrominoIHorizontal,
