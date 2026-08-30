@@ -4,9 +4,9 @@ using System.Collections.Generic;
 public class Board : MonoBehaviour
 {
     [SerializeField] GameObject slotPrefab = null;
-    public Dictionary<Vector2Int, BoardCell> boardCells = new Dictionary<Vector2Int, BoardCell>();
+    readonly Dictionary<Vector2Int, BoardCell> boardCells = new Dictionary<Vector2Int, BoardCell>();
     readonly HashSet<BoardCell> highlightedBoardCells = new HashSet<BoardCell>();
-    
+
     public void InitializeBoard(Vector2Int size)
     {
         ClearPreviewHighlights();
@@ -16,7 +16,13 @@ public class Board : MonoBehaviour
             return;
         }
 
-        foreach (var boardCell in boardCells)
+        if (size.x > BoardState.Size || size.y > BoardState.Size)
+        {
+            Debug.LogWarning($"Board: size {size} exceeds the {BoardState.Size}x{BoardState.Size} grid BoardState can represent.", this);
+            return;
+        }
+
+        foreach (KeyValuePair<Vector2Int, BoardCell> boardCell in boardCells)
         {
             Destroy(boardCell.Value.gameObject);
         }

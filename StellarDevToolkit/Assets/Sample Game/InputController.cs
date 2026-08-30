@@ -21,6 +21,11 @@ public class InputController : MonoBehaviour
             gameplayCamera = Camera.main;
         }
 
+        if (LayerMask.NameToLayer(BoardCellLayerName) < 0)
+        {
+            Debug.LogWarning($"InputController: Layer '{BoardCellLayerName}' was not found. Assign boardCellLayerMask manually.", this);
+        }
+
         EnsureBoardCellLayerMask();
     }
 
@@ -44,7 +49,6 @@ public class InputController : MonoBehaviour
         int boardCellLayerIndex = LayerMask.NameToLayer(BoardCellLayerName);
         if (boardCellLayerIndex < 0)
         {
-            Debug.LogWarning($"InputController: Layer '{BoardCellLayerName}' was not found. Assign boardCellLayerMask manually.", this);
             return;
         }
 
@@ -56,15 +60,7 @@ public class InputController : MonoBehaviour
         PointerDownThisFrame = IsPointerDownThisFrame();
         PointerHeld = IsPointerHeld();
         PointerUpThisFrame = IsPointerUpThisFrame();
-
-        if (!TryGetPointerScreenCoordinate(out Vector2 pointerScreenCoordinate))
-        {
-            HoveredBoardCell = null;
-            HoveredSelectionSlot = null;
-            return;
-        }
-
-        PointerScreenCoordinate = pointerScreenCoordinate;
+        PointerScreenCoordinate = GetPointerScreenCoordinate();
         HoveredBoardCell = TryGetHoveredBoardCell(out BoardCell boardCell) ? boardCell : null;
         HoveredSelectionSlot = TryGetHoveredSelectionSlot(out ShapeOfferSlot slot) ? slot : null;
     }
@@ -114,16 +110,9 @@ public class InputController : MonoBehaviour
         return true;
     }
 
-    bool TryGetPointerScreenCoordinate(out Vector2 pointerScreenCoordinate)
+    Vector2 GetPointerScreenCoordinate()
     {
-        if (Input.touchCount > 0)
-        {
-            pointerScreenCoordinate = Input.GetTouch(0).position;
-            return true;
-        }
-
-        pointerScreenCoordinate = Input.mousePosition;
-        return true;
+        return Input.touchCount > 0 ? Input.GetTouch(0).position : (Vector2)Input.mousePosition;
     }
 
     bool IsPointerDownThisFrame()

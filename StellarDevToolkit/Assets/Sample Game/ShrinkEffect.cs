@@ -28,11 +28,6 @@ public class ShrinkEffect : MonoBehaviour
         KillActiveTween();
     }
 
-    public Tween Shrink()
-    {
-        return Play();
-    }
-
     public Tween Play()
     {
         if (isPlaying)

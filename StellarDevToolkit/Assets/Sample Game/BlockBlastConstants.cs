@@ -1,7 +1,6 @@
 public static class BlockBlastConstants
 {
     public const int BoardSize = 8;
-    public const int MaxShapeBounds = 5;
     public const int TraySize = 3;
 
     // 5x5 footprint bitmasks for centered tetrominoes (all unique rotations).

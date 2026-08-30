@@ -5,8 +5,6 @@ using DG.Tweening;
 public class ShapeTray : MonoBehaviour
 {
     [SerializeField] ShapeDefinition definition = null;
-    [SerializeField] bool initializeFromPackedShapeDataOnAwake = false;
-    [SerializeField] int initialPackedShapeData = 0;
     [SerializeField] GameObject tilePrefab = null;
     [SerializeField] MeshCollider hitbox = null;
     [Range(0.1f, 1.0f)]
@@ -23,27 +21,18 @@ public class ShapeTray : MonoBehaviour
     public ShapeOfferSlot OwnerSlot { get; private set; }
 
     const int FootprintMask = (1 << ShapeDefinition.FootprintBitCount) - 1;
-    static readonly int BaseColorShaderId = Shader.PropertyToID("_BaseColor");
-    static readonly int ColorShaderId = Shader.PropertyToID("_Color");
     readonly Dictionary<Vector2Int, Tile> tilesByLocalCoord = new Dictionary<Vector2Int, Tile>();
     readonly List<Renderer> cachedRenderers = new List<Renderer>();
     readonly Dictionary<Renderer, Color> rendererBaseColors = new Dictionary<Renderer, Color>();
     MaterialPropertyBlock alphaPropertyBlock = null;
     Vector3 fullScale = Vector3.one;
     Tween slotPoseTween = null;
+    bool ownsDefinition = false;
 
     void Awake()
     {
         fullScale = transform.localScale;
-        if (initializeFromPackedShapeDataOnAwake)
-        {
-            InitializeFromPackedShapeData(initialPackedShapeData);
-        }
-        else
-        {
-            BuildTilesFromDefinition();
-        }
-
+        BuildTilesFromDefinition();
         RebuildTileDictionaryFromChildren();
         CacheRenderers();
     }
@@ -69,6 +58,7 @@ public class ShapeTray : MonoBehaviour
         if (definition == null)
         {
             definition = ScriptableObject.CreateInstance<ShapeDefinition>();
+            ownsDefinition = true;
         }
 
         definition.SetPackedData(footprintBits);
@@ -188,6 +178,16 @@ public class ShapeTray : MonoBehaviour
         KillSlotPoseTween();
     }
 
+    void OnDestroy()
+    {
+        // Only definitions this tray created at runtime are ours to destroy; a
+        // designer-assigned ShapeDefinition is a shared project asset.
+        if (ownsDefinition && definition != null)
+        {
+            Destroy(definition);
+        }
+    }
+
     Vector3 GetTargetSlotScale()
     {
         float ownerMultiplier = OwnerSlot != null ? OwnerSlot.ShapeScaleMultiplier : 1.0f;
@@ -257,8 +257,7 @@ public class ShapeTray : MonoBehaviour
             Color color = rendererBaseColors.TryGetValue(renderer, out Color baseColor) ? baseColor : Color.white;
             color.a = alpha;
             renderer.GetPropertyBlock(alphaPropertyBlock);
-            alphaPropertyBlock.SetColor(BaseColorShaderId, color);
-            alphaPropertyBlock.SetColor(ColorShaderId, color);
+            TintProperties.Apply(alphaPropertyBlock, color);
             renderer.SetPropertyBlock(alphaPropertyBlock);
         }
     }

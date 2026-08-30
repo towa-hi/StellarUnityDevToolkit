@@ -13,22 +13,10 @@ public class ShapeOfferArea : MonoBehaviour
 
     public IReadOnlyList<ShapeOfferSlot> OfferSlots => offerSlots;
     public IReadOnlyList<ShapeOfferSlot> PreviewSlots => previewSlots;
-    public int TraySize => offerSlots.Count;
     public bool IsPromoting { get; private set; }
 
     Sequence promoteSequence = null;
     Func<int, int[]> packedShapeBatchGenerator = null;
-
-    public void ValidateSceneWiring(MonoBehaviour context)
-    {
-        if (shapeTrayPrefab == null)
-        {
-            Debug.LogWarning("ShapeOfferArea: ShapeTray prefab reference is missing.", context);
-        }
-
-        ValidateSlotListWiring(offerSlots, "slot", context);
-        ValidateSlotListWiring(previewSlots, "preview slot", context);
-    }
 
     public bool CanBeginDragFrom(ShapeOfferSlot slot)
     {
@@ -51,21 +39,6 @@ public class ShapeOfferArea : MonoBehaviour
         KillPromotion();
         ClearAndPopulateSlots(offerSlots);
         ClearAndPopulateSlots(previewSlots);
-    }
-
-    public void PopulateEmptyShapeOfferSlots()
-    {
-        PopulateEmptySlots(offerSlots);
-    }
-
-    public void PopulateShapeOfferSlotsIfEmpty()
-    {
-        if (!AreAllSlotsEmpty(offerSlots))
-        {
-            return;
-        }
-
-        TryPromotePreviewBatch();
     }
 
     public void ConsumePlacedShape(ShapeOfferSlot slot, ShapeTray placedShape)
@@ -262,17 +235,6 @@ public class ShapeOfferArea : MonoBehaviour
         }
 
         return packedShapes;
-    }
-
-    void ValidateSlotListWiring(List<ShapeOfferSlot> slots, string slotLabel, MonoBehaviour context)
-    {
-        for (int i = 0; i < slots.Count; i++)
-        {
-            if (slots[i] == null)
-            {
-                Debug.LogWarning($"ShapeOfferArea: {slotLabel} {i} is missing.", context);
-            }
-        }
     }
 
     void OnDisable()

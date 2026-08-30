@@ -35,17 +35,9 @@ public static class GameUtility
             Mathf.RoundToInt(localPosition.y + centerOffset));
     }
 
-    public static int CalculatePlacementScore(BoardState boardStateBeforePlacement, BoardState boardStateAfterPlacement, int streak)
+    public static int CalculatePlacementScore(int newlyCompletedLineCount, int streak)
     {
-        if (boardStateBeforePlacement.OccupiedBits == boardStateAfterPlacement.OccupiedBits)
-        {
-            return 0;
-        }
-
-        int completedLinesBeforePlacement = GetCompletedLineCount(boardStateBeforePlacement);
-        int completedLinesAfterPlacement = GetCompletedLineCount(boardStateAfterPlacement);
-        int newlyCompletedLineCount = Mathf.Max(0, completedLinesAfterPlacement - completedLinesBeforePlacement);
-        if (newlyCompletedLineCount == 0)
+        if (newlyCompletedLineCount <= 0)
         {
             return 0;
         }
@@ -54,49 +46,5 @@ public static class GameUtility
         int multiplierPercent = 100 + (MaxStreakBonusPercent * clampedStreak) / (StreakSoftener + clampedStreak);
         int lineScore = newlyCompletedLineCount * BasePointsPerLine;
         return (lineScore * multiplierPercent) / 100;
-    }
-
-    static int GetCompletedLineCount(BoardState boardState)
-    {
-        int boardSize = BlockBlastConstants.BoardSize;
-        int completedLineCount = 0;
-
-        for (int y = 0; y < boardSize; y++)
-        {
-            bool isFullRow = true;
-            for (int x = 0; x < boardSize; x++)
-            {
-                if (!boardState.IsOccupied(x, y))
-                {
-                    isFullRow = false;
-                    break;
-                }
-            }
-
-            if (isFullRow)
-            {
-                completedLineCount++;
-            }
-        }
-
-        for (int x = 0; x < boardSize; x++)
-        {
-            bool isFullColumn = true;
-            for (int y = 0; y < boardSize; y++)
-            {
-                if (!boardState.IsOccupied(x, y))
-                {
-                    isFullColumn = false;
-                    break;
-                }
-            }
-
-            if (isFullColumn)
-            {
-                completedLineCount++;
-            }
-        }
-
-        return completedLineCount;
     }
 }

@@ -1,6 +1,5 @@
 using UnityEngine;
 using System.Collections.Generic;
-using UnityEngine.Serialization;
 
 public struct TileData
 {
@@ -14,8 +13,6 @@ public class ShapeDefinition : ScriptableObject
 {
     [SerializeField] string shapeId = "Shape";
     [SerializeField] int packedShapeData = 0;
-    [FormerlySerializedAs("tileOffsets")]
-    [SerializeField] List<Vector2Int> legacyTileOffsets = new List<Vector2Int>();
 
     public string ShapeId => shapeId;
     public int PackedShapeData => packedShapeData;
@@ -89,27 +86,5 @@ public class ShapeDefinition : ScriptableObject
     static int ToBitIndex(Vector2Int localCoord)
     {
         return localCoord.y * GridSize + localCoord.x;
-    }
-
-    void OnValidate()
-    {
-        if (packedShapeData == 0 && legacyTileOffsets != null && legacyTileOffsets.Count > 0)
-        {
-            int footprintBits = 0;
-            for (int i = 0; i < legacyTileOffsets.Count; i++)
-            {
-                Vector2Int localCoord = legacyTileOffsets[i];
-                if (localCoord.x < 0 || localCoord.x >= GridSize || localCoord.y < 0 || localCoord.y >= GridSize)
-                {
-                    continue;
-                }
-
-                int bitIndex = ToBitIndex(localCoord);
-                footprintBits |= (1 << bitIndex);
-            }
-
-            SetPackedData(footprintBits, ReservedBits);
-            cachedPackedData = int.MinValue;
-        }
     }
 }

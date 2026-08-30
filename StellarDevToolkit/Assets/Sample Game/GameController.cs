@@ -2,186 +2,6 @@ using UnityEngine;
 using System.Collections.Generic;
 using System;
 
-public struct BoardState
-{
-    public const int Size = BlockBlastConstants.BoardSize;
-
-    public readonly ulong OccupiedBits;
-
-    public BoardState(ulong occupiedBits)
-    {
-        OccupiedBits = occupiedBits;
-    }
-
-    public static BoardState Empty => new BoardState(0UL);
-
-    public static BoardState FromBoard(Board board)
-    {
-        if (board == null)
-        {
-            return Empty;
-        }
-
-        ulong occupiedBits = 0UL;
-        for (int y = 0; y < Size; y++)
-        {
-            for (int x = 0; x < Size; x++)
-            {
-                Vector2Int coord = new Vector2Int(x, y);
-                if (!board.TryGetCell(coord, out BoardCell boardCell) || !boardCell.IsOccupied)
-                {
-                    continue;
-                }
-
-                int bitIndex = ToBitIndex(x, y);
-                occupiedBits |= 1UL << bitIndex;
-            }
-        }
-
-        return new BoardState(occupiedBits);
-    }
-
-    public bool IsInBounds(int x, int y)
-    {
-        return x >= 0 && x < Size && y >= 0 && y < Size;
-    }
-
-    public bool IsInBounds(Vector2Int coord)
-    {
-        return IsInBounds(coord.x, coord.y);
-    }
-
-    public bool IsOccupied(int x, int y)
-    {
-        if (!IsInBounds(x, y))
-        {
-            return false;
-        }
-
-        int bitIndex = ToBitIndex(x, y);
-        return (OccupiedBits & (1UL << bitIndex)) != 0;
-    }
-
-    public bool IsOccupied(Vector2Int coord)
-    {
-        return IsOccupied(coord.x, coord.y);
-    }
-
-    public BoardState WithCellOccupied(int x, int y, bool occupied)
-    {
-        if (!IsInBounds(x, y))
-        {
-            return this;
-        }
-
-        int bitIndex = ToBitIndex(x, y);
-        ulong mask = 1UL << bitIndex;
-        ulong nextBits = occupied ? OccupiedBits | mask : OccupiedBits & ~mask;
-        return new BoardState(nextBits);
-    }
-
-    public BoardState WithCellOccupied(Vector2Int coord, bool occupied)
-    {
-        return WithCellOccupied(coord.x, coord.y, occupied);
-    }
-
-    public BoardState ClearCells(IEnumerable<Vector2Int> coords)
-    {
-        if (coords == null)
-        {
-            return this;
-        }
-
-        ulong nextBits = OccupiedBits;
-        foreach (Vector2Int coord in coords)
-        {
-            if (!IsInBounds(coord))
-            {
-                continue;
-            }
-
-            int bitIndex = ToBitIndex(coord.x, coord.y);
-            nextBits &= ~(1UL << bitIndex);
-        }
-
-        return new BoardState(nextBits);
-    }
-
-    static int ToBitIndex(int x, int y)
-    {
-        return y * Size + x;
-    }
-}
-
-public struct PlacementResolution
-{
-    public readonly bool IsValid;
-    public readonly int PlacedTileCount;
-    public readonly int ClearedCellCount;
-    public readonly int ClearedLineCount;
-    public readonly Vector2Int[] ClearedCoords;
-    public readonly BoardState BoardStateAfterPiecePlacement;
-    public readonly BoardState BoardStateAfterPlacement;
-
-    public PlacementResolution(
-        bool isValid,
-        int placedTileCount,
-        int clearedCellCount,
-        int clearedLineCount,
-        Vector2Int[] clearedCoords,
-        BoardState boardStateAfterPiecePlacement,
-        BoardState boardStateAfterPlacement)
-    {
-        IsValid = isValid;
-        PlacedTileCount = placedTileCount;
-        ClearedCellCount = clearedCellCount;
-        ClearedLineCount = clearedLineCount;
-        ClearedCoords = clearedCoords ?? new Vector2Int[0];
-        BoardStateAfterPiecePlacement = boardStateAfterPiecePlacement;
-        BoardStateAfterPlacement = boardStateAfterPlacement;
-    }
-
-    public static PlacementResolution Invalid(BoardState state)
-    {
-        return new PlacementResolution(false, 0, 0, 0, null, state, state);
-    }
-}
-
-public struct IntegerRng
-{
-    public uint State;
-
-    public IntegerRng(uint seed)
-    {
-        State = seed == 0u ? 0x9E3779B9u : seed;
-    }
-
-    public uint NextU32()
-    {
-        uint x = State;
-        if (x == 0u)
-        {
-            x = 0x9E3779B9u;
-        }
-
-        x ^= x << 13;
-        x ^= x >> 17;
-        x ^= x << 5;
-        State = x;
-        return x;
-    }
-
-    public int NextIndex(int count)
-    {
-        if (count <= 0)
-        {
-            return 0;
-        }
-
-        return (int)(NextU32() % (uint)count);
-    }
-}
-
 public class GameController : MonoBehaviour
 {
     public event Action<int, int> ScoreChanged;
@@ -202,14 +22,15 @@ public class GameController : MonoBehaviour
     [SerializeField] Camera gameplayCamera = null;
     [SerializeField] float dragPlaneDepth = 0.0f;
 
-    [SerializeField] public GameState State = GameState.NotStarted;
-    public int Score = 0;
+    public GameState State { get; private set; } = GameState.NotStarted;
+    public int Score { get; private set; }
     public uint GameSeed { get; private set; }
     int lineClearStreak = 0;
 
     ShapeTray draggedShape = null;
     ShapeOfferSlot draggedFromSlot = null;
     readonly List<Vector2Int> previewCoordsBuffer = new List<Vector2Int>();
+    readonly List<BoardCell> placementCellsBuffer = new List<BoardCell>();
     IntegerRng gameRandom;
 
     void Awake()
@@ -296,11 +117,6 @@ public class GameController : MonoBehaviour
     {
         uint seed = unchecked((uint)(Environment.TickCount ^ Guid.NewGuid().GetHashCode()));
         return seed == 0u ? 1u : seed;
-    }
-
-    public void SetState(GameState state)
-    {
-        State = state;
     }
 
     public bool HasActiveDrag()
@@ -418,15 +234,25 @@ public class GameController : MonoBehaviour
             return false;
         }
 
-        foreach (Vector2Int offset in shapeDefinition.TileOffsets)
+        // Resolve every destination cell before mutating any of them, so a failed
+        // lookup cannot leave the board half-placed.
+        IReadOnlyList<Vector2Int> tileOffsets = shapeDefinition.TileOffsets;
+        placementCellsBuffer.Clear();
+        for (int i = 0; i < tileOffsets.Count; i++)
         {
-            Vector2Int targetCoord = GameUtility.GetPlacementTargetCoord(anchorCoord, offset);
+            Vector2Int targetCoord = GameUtility.GetPlacementTargetCoord(anchorCoord, tileOffsets[i]);
             if (!board.TryGetCell(targetCoord, out BoardCell targetCell))
             {
                 return false;
             }
 
-            if (sourceShape != null && sourceShape.TryGetTile(offset, out Tile tile) && tile != null)
+            placementCellsBuffer.Add(targetCell);
+        }
+
+        for (int i = 0; i < tileOffsets.Count; i++)
+        {
+            BoardCell targetCell = placementCellsBuffer[i];
+            if (sourceShape != null && sourceShape.TryGetTile(tileOffsets[i], out Tile tile) && tile != null)
             {
                 AttachTileToBoardCell(tile, targetCell);
                 targetCell.SetOccupiedState(true, tile);
@@ -438,10 +264,7 @@ public class GameController : MonoBehaviour
         }
 
         ClearResolvedCells(placementResolution.ClearedCoords);
-        int earnedScore = GameUtility.CalculatePlacementScore(
-            boardState,
-            placementResolution.BoardStateAfterPiecePlacement,
-            lineClearStreak);
+        int earnedScore = GameUtility.CalculatePlacementScore(placementResolution.ClearedLineCount, lineClearStreak);
         SetScore(Score + earnedScore);
 
         lineClearStreak = placementResolution.ClearedLineCount > 0
@@ -607,7 +430,7 @@ public class GameController : MonoBehaviour
     {
         if (!CanPlaceShape(boardState, shapeDefinition, anchorCoord))
         {
-            return PlacementResolution.Invalid(boardState);
+            return PlacementResolution.Invalid();
         }
 
         BoardState placedState = boardState;
@@ -617,82 +440,19 @@ public class GameController : MonoBehaviour
             placedState = placedState.WithCellOccupied(targetCoord, true);
         }
 
-        HashSet<Vector2Int> cellsToClear = GetCompletedLineCells(placedState, out int clearedLineCount);
-        BoardState finalState = placedState.ClearCells(cellsToClear);
-
+        HashSet<Vector2Int> cellsToClear = placedState.GetCompletedLineCells(out int clearedLineCount);
         Vector2Int[] clearedCoords = new Vector2Int[cellsToClear.Count];
         cellsToClear.CopyTo(clearedCoords);
-        return new PlacementResolution(
-            true,
-            shapeDefinition.TileOffsets.Count,
-            cellsToClear.Count,
-            clearedLineCount,
-            clearedCoords,
-            placedState,
-            finalState);
+        return new PlacementResolution(true, clearedLineCount, clearedCoords);
     }
 
-    HashSet<Vector2Int> GetCompletedLineCells(BoardState boardState, out int clearedLineCount)
-    {
-        HashSet<Vector2Int> cellsToClear = new HashSet<Vector2Int>();
-        int boardSize = BlockBlastConstants.BoardSize;
-        clearedLineCount = 0;
-
-        for (int y = 0; y < boardSize; y++)
-        {
-            bool isFullRow = true;
-            for (int x = 0; x < boardSize; x++)
-            {
-                if (!boardState.IsOccupied(x, y))
-                {
-                    isFullRow = false;
-                    break;
-                }
-            }
-
-            if (isFullRow)
-            {
-                clearedLineCount++;
-                for (int x = 0; x < boardSize; x++)
-                {
-                    cellsToClear.Add(new Vector2Int(x, y));
-                }
-            }
-        }
-
-        for (int x = 0; x < boardSize; x++)
-        {
-            bool isFullColumn = true;
-            for (int y = 0; y < boardSize; y++)
-            {
-                if (!boardState.IsOccupied(x, y))
-                {
-                    isFullColumn = false;
-                    break;
-                }
-            }
-
-            if (isFullColumn)
-            {
-                clearedLineCount++;
-                for (int y = 0; y < boardSize; y++)
-                {
-                    cellsToClear.Add(new Vector2Int(x, y));
-                }
-            }
-        }
-
-        return cellsToClear;
-    }
-
-    int ClearResolvedCells(IReadOnlyCollection<Vector2Int> cellsToClear)
+    void ClearResolvedCells(IReadOnlyCollection<Vector2Int> cellsToClear)
     {
         if (board == null || cellsToClear == null || cellsToClear.Count == 0)
         {
-            return 0;
+            return;
         }
 
-        int clearedCellCount = 0;
         foreach (Vector2Int coord in cellsToClear)
         {
             if (!board.TryGetCell(coord, out BoardCell boardCell))
@@ -714,11 +474,7 @@ public class GameController : MonoBehaviour
                     Destroy(occupiedTile.gameObject);
                 }
             }
-
-            clearedCellCount++;
         }
-
-        return clearedCellCount;
     }
 
     bool HasAnyValidPlacement()

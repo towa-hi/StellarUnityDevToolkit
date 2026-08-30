@@ -8,9 +8,15 @@ public class GameUI : MonoBehaviour
 
     public void Initialize(GameController controller)
     {
+        UnsubscribeFromController();
         gameController = controller;
         SubscribeToController();
         SyncScoreDisplay();
+    }
+
+    void OnDestroy()
+    {
+        UnsubscribeFromController();
     }
 
     void HandleScoreChanged(int totalScore, int scoreDifference)
@@ -28,9 +34,23 @@ public class GameUI : MonoBehaviour
 
     void SubscribeToController()
     {
+        if (gameController == null)
+        {
+            return;
+        }
 
         gameController.ScoreChanged -= HandleScoreChanged;
         gameController.ScoreChanged += HandleScoreChanged;
+    }
+
+    void UnsubscribeFromController()
+    {
+        if (gameController == null)
+        {
+            return;
+        }
+
+        gameController.ScoreChanged -= HandleScoreChanged;
     }
 
     void SyncScoreDisplay()
@@ -40,7 +60,7 @@ public class GameUI : MonoBehaviour
             differencePopup.SetDifference(0);
         }
 
-        if (totalScorePopup != null)
+        if (totalScorePopup != null && gameController != null)
         {
             totalScorePopup.SetTotalScoreImmediate(gameController.Score);
         }

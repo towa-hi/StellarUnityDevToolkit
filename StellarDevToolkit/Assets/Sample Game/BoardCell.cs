@@ -78,8 +78,7 @@ public class BoardCell : MonoBehaviour
         }
 
         backgroundRenderer.GetPropertyBlock(backgroundPropertyBlock);
-        backgroundPropertyBlock.SetColor("_BaseColor", color);
-        backgroundPropertyBlock.SetColor("_Color", color);
+        TintProperties.Apply(backgroundPropertyBlock, color);
         backgroundRenderer.SetPropertyBlock(backgroundPropertyBlock);
     }
 }
