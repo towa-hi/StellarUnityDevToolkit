@@ -1,6 +1,8 @@
 using UnityEngine;
+using UnityEngine.Serialization;
 using System.Collections.Generic;
 using System;
+using DG.Tweening;
 
 public class GameController : MonoBehaviour
 {
@@ -21,6 +23,12 @@ public class GameController : MonoBehaviour
     [SerializeField] GameUI gameUI = null;
     [SerializeField] Camera gameplayCamera = null;
     [SerializeField] float dragPlaneDepth = 0.0f;
+    [FormerlySerializedAs("useDragYMultiplier")]
+    [SerializeField] bool useDragAxisMultipliers = false;
+    [SerializeField] float dragXMultiplier = 1.0f;
+    [SerializeField] float dragYMultiplier = 2.0f;
+    [SerializeField] float dragScaleDuration = 0.12f;
+    [SerializeField] float dropSettleDuration = 0.12f;
 
     public GameState State { get; private set; } = GameState.NotStarted;
     public int Score { get; private set; }
@@ -29,6 +37,9 @@ public class GameController : MonoBehaviour
 
     ShapeTray draggedShape = null;
     ShapeOfferSlot draggedFromSlot = null;
+    Vector2 dragOriginScreenCoordinate = Vector2.zero;
+    Vector3 dragGrabOffset = Vector3.zero;
+    Tween dropSettleTween = null;
     readonly List<Vector2Int> previewCoordsBuffer = new List<Vector2Int>();
     readonly List<BoardCell> placementCellsBuffer = new List<BoardCell>();
     IntegerRng gameRandom;
@@ -39,6 +50,11 @@ public class GameController : MonoBehaviour
         {
             gameUI.Initialize(this);
         }
+    }
+
+    void OnDisable()
+    {
+        KillDropSettleTween();
     }
 
     void Update()
@@ -126,7 +142,7 @@ public class GameController : MonoBehaviour
 
     public bool TryBeginDrag(ShapeOfferSlot sourceSlot)
     {
-        if (State == GameState.GameOver || sourceSlot == null || !sourceSlot.HasShape())
+        if (State != GameState.WaitingForDrag || sourceSlot == null || !sourceSlot.HasShape())
         {
             return false;
         }
@@ -145,15 +161,24 @@ public class GameController : MonoBehaviour
         draggedShape = shape;
         draggedFromSlot = sourceSlot;
         draggedShape.transform.SetParent(null, true);
-        draggedShape.EnterDragVisualState();
+        draggedShape.EnterDragVisualState(dragScaleDuration);
         State = GameState.DraggingShape;
 
-        if (TryGetDragPlanePoint(inputController != null ? inputController.PointerScreenCoordinate : Vector2.zero, out Vector3 dragPoint))
+        Vector2 pointerScreen = inputController != null ? inputController.PointerScreenCoordinate : Vector2.zero;
+        dragOriginScreenCoordinate = pointerScreen;
+        if (TryGetDragWorldPoint(pointerScreen, out Vector3 dragPoint))
         {
-            draggedShape.SetWorldDragPosition(dragPoint);
+            Vector3 trayPos = draggedShape.transform.position;
+            dragGrabOffset = new Vector3(trayPos.x - dragPoint.x, trayPos.y - dragPoint.y, 0.0f);
+            draggedShape.SetWorldDragPosition(ApplyDragGrabOffset(dragPoint));
+            UpdateHoveredBoardCellPreview(ResolveDragHoverCell(pointerScreen));
+        }
+        else
+        {
+            dragGrabOffset = Vector3.zero;
+            UpdateHoveredBoardCellPreview(null);
         }
 
-        UpdateHoveredBoardCellPreview(null);
         return true;
     }
 
@@ -168,9 +193,10 @@ public class GameController : MonoBehaviour
             return;
         }
 
-        if (TryGetDragPlanePoint(screenCoordinate, out Vector3 dragPoint))
+        if (TryGetDragWorldPoint(screenCoordinate, out Vector3 dragPoint))
         {
-            draggedShape.SetWorldDragPosition(dragPoint);
+            draggedShape.SetWorldDragPosition(ApplyDragGrabOffset(dragPoint));
+            hoveredBoardCell = ResolveDragHoverCell(screenCoordinate, hoveredBoardCell);
         }
 
         UpdateHoveredBoardCellPreview(hoveredBoardCell);
@@ -178,46 +204,34 @@ public class GameController : MonoBehaviour
 
     public void EndActiveDrag(BoardCell hoveredBoardCell)
     {
+        if (State == GameState.ResolvingPlacement)
+        {
+            return;
+        }
+
         if (draggedShape == null || draggedFromSlot == null)
         {
             CancelActiveDrag();
             return;
         }
 
-        bool placed = false;
-        if (TryGetPlacementAnchorFromHoveredCell(hoveredBoardCell, out Vector2Int anchorCoord))
+        if (inputController != null)
         {
-            placed = TryPlaceShape(draggedShape.Definition, anchorCoord, draggedShape);
+            hoveredBoardCell = ResolveDragHoverCell(inputController.PointerScreenCoordinate, hoveredBoardCell);
         }
 
-        if (placed)
+        ShapeTray shape = draggedShape;
+        ShapeOfferSlot sourceSlot = draggedFromSlot;
+        shape.ExitDragVisualState();
+
+        if (TryGetPlacementAnchorFromHoveredCell(hoveredBoardCell, out Vector2Int anchorCoord)
+            && CanPlaceShape(shape.Definition, anchorCoord))
         {
-            ShapeTray placedShape = draggedShape;
-            ShapeOfferSlot sourceSlot = draggedFromSlot;
-            CancelActiveDrag();
-
-            if (offerArea != null)
-            {
-                offerArea.ConsumePlacedShape(sourceSlot, placedShape);
-            }
-            else
-            {
-                sourceSlot.Clear();
-                Destroy(placedShape.gameObject);
-            }
-
-            State = GameState.ResolvingPlacement;
-            if (!CheckForGameOver())
-            {
-                State = GameState.WaitingForDrag;
-            }
+            BeginBoardDrop(shape, sourceSlot, hoveredBoardCell, anchorCoord);
             return;
         }
 
-        draggedShape.ExitDragVisualState();
-        draggedFromSlot.SetShape(draggedShape);
-        CancelActiveDrag();
-        State = GameState.WaitingForDrag;
+        BeginSlotReturn(shape, sourceSlot);
     }
 
     public bool TryPlaceShape(ShapeDefinition shapeDefinition, Vector2Int anchorCoord, ShapeTray sourceShape = null)
@@ -300,6 +314,91 @@ public class GameController : MonoBehaviour
 
     void CancelActiveDrag()
     {
+        KillDropSettleTween();
+        ClearDragState();
+    }
+
+    void BeginBoardDrop(ShapeTray shape, ShapeOfferSlot sourceSlot, BoardCell hoveredBoardCell, Vector2Int anchorCoord)
+    {
+        State = GameState.ResolvingPlacement;
+        Vector3 targetPos = hoveredBoardCell.transform.position;
+        targetPos.z += 0.5f;
+        Quaternion targetRot = hoveredBoardCell.transform.rotation;
+        Tween settleTween = shape.LerpToWorldPose(targetPos, targetRot, shape.FullScale, dropSettleDuration);
+        if (settleTween == null)
+        {
+            CommitBoardDrop(shape, sourceSlot, anchorCoord);
+            return;
+        }
+
+        dropSettleTween = settleTween.OnComplete(() => CommitBoardDrop(shape, sourceSlot, anchorCoord));
+    }
+
+    void CommitBoardDrop(ShapeTray shape, ShapeOfferSlot sourceSlot, Vector2Int anchorCoord)
+    {
+        dropSettleTween = null;
+        bool placed = TryPlaceShape(shape.Definition, anchorCoord, shape);
+        if (!placed)
+        {
+            BeginSlotReturn(shape, sourceSlot);
+            return;
+        }
+
+        ClearDragState();
+        if (offerArea != null)
+        {
+            offerArea.ConsumePlacedShape(sourceSlot, shape);
+        }
+        else
+        {
+            sourceSlot.Clear();
+            Destroy(shape.gameObject);
+        }
+
+        if (!CheckForGameOver())
+        {
+            State = GameState.WaitingForDrag;
+        }
+    }
+
+    void BeginSlotReturn(ShapeTray shape, ShapeOfferSlot sourceSlot)
+    {
+        State = GameState.ResolvingPlacement;
+        if (board != null)
+        {
+            board.ClearPreviewHighlights();
+        }
+
+        sourceSlot.SetShape(shape, snapToPose: false);
+        Tween settleTween = shape.LerpToSlotPose(dropSettleDuration);
+        if (settleTween == null)
+        {
+            CompleteSlotReturn();
+            return;
+        }
+
+        dropSettleTween = settleTween.OnComplete(CompleteSlotReturn);
+    }
+
+    void CompleteSlotReturn()
+    {
+        dropSettleTween = null;
+        ClearDragState();
+        State = GameState.WaitingForDrag;
+    }
+
+    void KillDropSettleTween()
+    {
+        if (dropSettleTween != null && dropSettleTween.IsActive())
+        {
+            dropSettleTween.Kill();
+        }
+
+        dropSettleTween = null;
+    }
+
+    void ClearDragState()
+    {
         if (board != null)
         {
             board.ClearPreviewHighlights();
@@ -307,6 +406,8 @@ public class GameController : MonoBehaviour
 
         draggedShape = null;
         draggedFromSlot = null;
+        dragOriginScreenCoordinate = Vector2.zero;
+        dragGrabOffset = Vector3.zero;
     }
 
     void UpdateHoveredBoardCellPreview(BoardCell hoveredBoardCell)
@@ -345,7 +446,7 @@ public class GameController : MonoBehaviour
 
     void HandlePointerInput()
     {
-        if (inputController == null)
+        if (inputController == null || State == GameState.ResolvingPlacement || State == GameState.GameOver)
         {
             return;
         }
@@ -369,6 +470,49 @@ public class GameController : MonoBehaviour
         {
             EndActiveDrag(inputController.HoveredBoardCell);
         }
+    }
+
+    Vector3 ApplyDragGrabOffset(Vector3 dragPoint)
+    {
+        dragPoint.x += dragGrabOffset.x;
+        dragPoint.y += dragGrabOffset.y;
+        return dragPoint;
+    }
+
+    Vector2 GetMappedDragScreenCoordinate(Vector2 screenCoordinate)
+    {
+        if (useDragAxisMultipliers)
+        {
+            Vector2 delta = screenCoordinate - dragOriginScreenCoordinate;
+            screenCoordinate.x = dragOriginScreenCoordinate.x + delta.x * dragXMultiplier;
+            screenCoordinate.y = dragOriginScreenCoordinate.y + delta.y * dragYMultiplier;
+        }
+
+        return screenCoordinate;
+    }
+
+    bool TryGetDragWorldPoint(Vector2 screenCoordinate, out Vector3 worldPoint)
+    {
+        return TryGetDragPlanePoint(GetMappedDragScreenCoordinate(screenCoordinate), out worldPoint);
+    }
+
+    BoardCell ResolveDragHoverCell(Vector2 screenCoordinate, BoardCell pointerHoveredCell = null)
+    {
+        if (!useDragAxisMultipliers)
+        {
+            return pointerHoveredCell != null
+                ? pointerHoveredCell
+                : (inputController != null ? inputController.HoveredBoardCell : null);
+        }
+
+        if (inputController == null)
+        {
+            return null;
+        }
+
+        return inputController.TryGetBoardCellAtScreenCoordinate(GetMappedDragScreenCoordinate(screenCoordinate), out BoardCell hoverCell)
+            ? hoverCell
+            : null;
     }
 
     bool TryGetDragPlanePoint(Vector2 screenCoordinate, out Vector3 worldPoint)

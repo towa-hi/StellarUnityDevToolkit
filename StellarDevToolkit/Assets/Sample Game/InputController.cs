@@ -65,7 +65,7 @@ public class InputController : MonoBehaviour
         HoveredSelectionSlot = TryGetHoveredSelectionSlot(out ShapeOfferSlot slot) ? slot : null;
     }
 
-    bool TryGetHoveredBoardCell(out BoardCell boardCell)
+    public bool TryGetBoardCellAtScreenCoordinate(Vector2 screenCoordinate, out BoardCell boardCell)
     {
         boardCell = null;
         if (gameplayCamera == null)
@@ -73,7 +73,7 @@ public class InputController : MonoBehaviour
             return false;
         }
 
-        Ray ray = gameplayCamera.ScreenPointToRay(PointerScreenCoordinate);
+        Ray ray = gameplayCamera.ScreenPointToRay(screenCoordinate);
         if (Physics.Raycast(ray, out RaycastHit hitInfo, float.MaxValue, boardCellLayerMask))
         {
             boardCell = hitInfo.collider.GetComponentInParent<BoardCell>();
@@ -84,6 +84,11 @@ public class InputController : MonoBehaviour
         }
 
         return false;
+    }
+
+    bool TryGetHoveredBoardCell(out BoardCell boardCell)
+    {
+        return TryGetBoardCellAtScreenCoordinate(PointerScreenCoordinate, out boardCell);
     }
 
     bool TryGetHoveredSelectionSlot(out ShapeOfferSlot slot)

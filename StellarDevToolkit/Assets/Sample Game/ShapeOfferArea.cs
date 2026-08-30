@@ -10,6 +10,7 @@ public class ShapeOfferArea : MonoBehaviour
     [SerializeField] List<ShapeOfferSlot> previewSlots = new List<ShapeOfferSlot>();
     [SerializeField] float previewShapeScaleMultiplier = 0.65f;
     [SerializeField] float promoteDuration = 0.22f;
+    [SerializeField] float previewSpawnDuration = 0.22f;
 
     public IReadOnlyList<ShapeOfferSlot> OfferSlots => offerSlots;
     public IReadOnlyList<ShapeOfferSlot> PreviewSlots => previewSlots;
@@ -59,17 +60,24 @@ public class ShapeOfferArea : MonoBehaviour
         }
     }
 
-    void PopulateShapeOfferSlot(ShapeOfferSlot slot, int packedShapeData)
+    Tween PopulateShapeOfferSlot(ShapeOfferSlot slot, int packedShapeData)
     {
         if (slot == null || shapeTrayPrefab == null)
         {
-            return;
+            return null;
         }
 
         Transform slotAnchor = slot.GetSlotAnchor();
         ShapeTray spawnedTray = Instantiate(shapeTrayPrefab, slotAnchor.position, slotAnchor.rotation);
         spawnedTray.InitializeFromPackedShapeData(packedShapeData);
-        slot.SetShape(spawnedTray);
+        bool spawnWithScaleLerp = previewSlots.Contains(slot) || slot.IsPreview;
+        slot.SetShape(spawnedTray, snapToPose: !spawnWithScaleLerp);
+        if (spawnWithScaleLerp)
+        {
+            return spawnedTray.PlaySpawnScale(previewSpawnDuration);
+        }
+
+        return null;
     }
 
     void TryPromotePreviewBatch()
@@ -112,6 +120,7 @@ public class ShapeOfferArea : MonoBehaviour
             return;
         }
 
+        PopulateEmptySlots(previewSlots, sequence);
         IsPromoting = true;
         promoteSequence = sequence
             .OnComplete(HandlePromotionCompleted)
@@ -122,7 +131,6 @@ public class ShapeOfferArea : MonoBehaviour
     {
         IsPromoting = false;
         promoteSequence = null;
-        PopulateEmptySlots(previewSlots);
     }
 
     void HandlePromotionKilled()
@@ -169,7 +177,7 @@ public class ShapeOfferArea : MonoBehaviour
         PopulateSlotsWithBatch(slotsToFill);
     }
 
-    void PopulateEmptySlots(List<ShapeOfferSlot> slots)
+    void PopulateEmptySlots(List<ShapeOfferSlot> slots, Sequence joinSequence = null)
     {
         if (shapeTrayPrefab == null)
         {
@@ -187,10 +195,10 @@ public class ShapeOfferArea : MonoBehaviour
             slotsToFill.Add(slot);
         }
 
-        PopulateSlotsWithBatch(slotsToFill);
+        PopulateSlotsWithBatch(slotsToFill, joinSequence);
     }
 
-    void PopulateSlotsWithBatch(List<ShapeOfferSlot> slots)
+    void PopulateSlotsWithBatch(List<ShapeOfferSlot> slots, Sequence joinSequence = null)
     {
         if (slots == null || slots.Count == 0)
         {
@@ -203,7 +211,11 @@ public class ShapeOfferArea : MonoBehaviour
             int packedShapeData = packedShapes != null && i < packedShapes.Length
                 ? packedShapes[i]
                 : 0;
-            PopulateShapeOfferSlot(slots[i], packedShapeData);
+            Tween spawnTween = PopulateShapeOfferSlot(slots[i], packedShapeData);
+            if (joinSequence != null && spawnTween != null)
+            {
+                joinSequence.Insert(0.0f, spawnTween);
+            }
         }
     }
 
@@ -246,6 +258,7 @@ public class ShapeOfferArea : MonoBehaviour
     {
         previewShapeScaleMultiplier = Mathf.Max(0.1f, previewShapeScaleMultiplier);
         promoteDuration = Mathf.Max(0.0f, promoteDuration);
+        previewSpawnDuration = Mathf.Max(0.0f, previewSpawnDuration);
         EnsureSlotListSize(offerSlots);
         EnsureSlotListSize(previewSlots);
         ApplySlotRoles(offerSlots, false, 1.0f);

@@ -19,7 +19,10 @@ public class ShapeTray : MonoBehaviour
     public MeshCollider Hitbox => hitbox;
     public IReadOnlyDictionary<Vector2Int, Tile> TilesByLocalCoord => tilesByLocalCoord;
     public ShapeOfferSlot OwnerSlot { get; private set; }
+    public Vector3 FullScale => fullScale;
 
+    const float TileLocalZOffset = -0.5f;
+    const float DragWorldZOffset = -1.0f;
     const int FootprintMask = (1 << ShapeDefinition.FootprintBitCount) - 1;
     readonly Dictionary<Vector2Int, Tile> tilesByLocalCoord = new Dictionary<Vector2Int, Tile>();
     readonly List<Renderer> cachedRenderers = new List<Renderer>();
@@ -108,11 +111,67 @@ public class ShapeTray : MonoBehaviour
         return slotPoseTween;
     }
 
-    public void EnterDragVisualState()
+    public Tween PlaySpawnScale(float duration)
     {
         KillSlotPoseTween();
-        transform.localScale = fullScale;
+        Transform slotAnchor = OwnerSlot != null ? OwnerSlot.GetSlotAnchor() : transform.parent;
+        if (slotAnchor == null)
+        {
+            return null;
+        }
+
+        transform.SetParent(slotAnchor, false);
+        transform.localPosition = Vector3.zero;
+        transform.localRotation = Quaternion.identity;
+        SetAlpha(idleAlpha);
+
+        if (duration <= 0.0f)
+        {
+            transform.localScale = GetTargetSlotScale();
+            return null;
+        }
+
+        transform.localScale = Vector3.zero;
+        slotPoseTween = transform.DOScale(GetTargetSlotScale(), duration)
+            .SetEase(Ease.OutCubic)
+            .SetLink(gameObject);
+        return slotPoseTween;
+    }
+
+    public Tween EnterDragVisualState(float duration)
+    {
+        KillSlotPoseTween();
         SetAlpha(dragAlpha);
+        if (duration <= 0.0f)
+        {
+            transform.localScale = fullScale;
+            return null;
+        }
+
+        slotPoseTween = transform.DOScale(fullScale, duration)
+            .SetEase(Ease.OutCubic)
+            .SetLink(gameObject);
+        return slotPoseTween;
+    }
+
+    public Tween LerpToWorldPose(Vector3 worldPos, Quaternion worldRot, Vector3 scale, float duration)
+    {
+        KillSlotPoseTween();
+        transform.SetParent(null, true);
+        if (duration <= 0.0f)
+        {
+            transform.SetPositionAndRotation(worldPos, worldRot);
+            transform.localScale = scale;
+            return null;
+        }
+
+        slotPoseTween = DOTween.Sequence()
+            .Join(transform.DOMove(worldPos, duration))
+            .Join(transform.DORotateQuaternion(worldRot, duration))
+            .Join(transform.DOScale(scale, duration))
+            .SetEase(Ease.OutCubic)
+            .SetLink(gameObject);
+        return slotPoseTween;
     }
 
     public void ExitDragVisualState()
@@ -122,6 +181,7 @@ public class ShapeTray : MonoBehaviour
 
     public void SetWorldDragPosition(Vector3 worldPos)
     {
+        worldPos.z += DragWorldZOffset;
         transform.position = worldPos;
     }
 
@@ -162,7 +222,7 @@ public class ShapeTray : MonoBehaviour
                 tile = tileObject.AddComponent<Tile>();
             }
 
-            tile.transform.localPosition = new Vector3(tileOffset.x - centerOffset, tileOffset.y - centerOffset, 0.0f);
+            tile.transform.localPosition = new Vector3(tileOffset.x - centerOffset, tileOffset.y - centerOffset, TileLocalZOffset);
             tile.transform.localRotation = Quaternion.identity;
             tile.transform.localScale = Vector3.one;
         }
