@@ -4,6 +4,7 @@ public class GameUI : MonoBehaviour
 {
     [SerializeField] DifferencePopup differencePopup = null;
     [SerializeField] TotalScorePopup totalScorePopup = null;
+    [SerializeField] StreakPopup streakPopup = null;
     GameController gameController = null;
 
     public void Initialize(GameController controller)
@@ -32,6 +33,14 @@ public class GameUI : MonoBehaviour
         }
     }
 
+    void HandleStreakChanged(int currentStreak)
+    {
+        if (streakPopup != null)
+        {
+            streakPopup.SetStreak(currentStreak);
+        }
+    }
+
     void SubscribeToController()
     {
         if (gameController == null)
@@ -41,6 +50,8 @@ public class GameUI : MonoBehaviour
 
         gameController.ScoreChanged -= HandleScoreChanged;
         gameController.ScoreChanged += HandleScoreChanged;
+        gameController.StreakChanged -= HandleStreakChanged;
+        gameController.StreakChanged += HandleStreakChanged;
     }
 
     void UnsubscribeFromController()
@@ -51,6 +62,7 @@ public class GameUI : MonoBehaviour
         }
 
         gameController.ScoreChanged -= HandleScoreChanged;
+        gameController.StreakChanged -= HandleStreakChanged;
     }
 
     void SyncScoreDisplay()
@@ -63,6 +75,11 @@ public class GameUI : MonoBehaviour
         if (totalScorePopup != null && gameController != null)
         {
             totalScorePopup.SetTotalScoreImmediate(gameController.Score);
+        }
+
+        if (streakPopup != null && gameController != null)
+        {
+            streakPopup.SetStreakImmediate(gameController.CurrentStreak);
         }
     }
 }

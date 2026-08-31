@@ -7,6 +7,7 @@ using DG.Tweening;
 public class GameController : MonoBehaviour
 {
     public event Action<int, int> ScoreChanged;
+    public event Action<int> StreakChanged;
 
     public enum GameState
     {
@@ -32,8 +33,8 @@ public class GameController : MonoBehaviour
 
     public GameState State { get; private set; } = GameState.NotStarted;
     public int Score { get; private set; }
+    public int CurrentStreak { get; private set; }
     public uint GameSeed { get; private set; }
-    int lineClearStreak = 0;
 
     ShapeTray draggedShape = null;
     ShapeOfferSlot draggedFromSlot = null;
@@ -90,7 +91,7 @@ public class GameController : MonoBehaviour
         }
 
         SetScore(0);
-        lineClearStreak = 0;
+        SetStreak(0);
         State = GameState.WaitingForDrag;
     }
 
@@ -278,12 +279,12 @@ public class GameController : MonoBehaviour
         }
 
         ClearResolvedCells(placementResolution.ClearedCoords);
-        int earnedScore = GameUtility.CalculatePlacementScore(placementResolution.ClearedLineCount, lineClearStreak);
+        int earnedScore = GameUtility.CalculatePlacementScore(placementResolution.ClearedLineCount, CurrentStreak);
         SetScore(Score + earnedScore);
 
-        lineClearStreak = placementResolution.ClearedLineCount > 0
-            ? lineClearStreak + 1
-            : 0;
+        SetStreak(placementResolution.ClearedLineCount > 0
+            ? CurrentStreak + 1
+            : 0);
 
         return true;
     }
@@ -676,5 +677,16 @@ public class GameController : MonoBehaviour
         int scoreDifference = newScore - Score;
         Score = newScore;
         ScoreChanged?.Invoke(Score, scoreDifference);
+    }
+
+    void SetStreak(int newStreak)
+    {
+        if (CurrentStreak == newStreak)
+        {
+            return;
+        }
+
+        CurrentStreak = newStreak;
+        StreakChanged?.Invoke(CurrentStreak);
     }
 }

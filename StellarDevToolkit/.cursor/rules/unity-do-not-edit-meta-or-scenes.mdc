@@ -1,0 +1,12 @@
+---
+description: Never edit Unity .meta files; never edit scenes unless the user explicitly permits it
+alwaysApply: true
+---
+
+# Unity meta files and scenes
+
+- **Never create, edit, rename, or delete `.meta` files.** Unity owns GUIDs and importer settings. Leave `.meta` entirely to Unity.
+- **Never create, edit, or delete Unity scenes** (`.unity`) unless the user explicitly asks for that scene change in the current request.
+- Do not work around this by editing scene YAML, scene `.meta`, or related serialized assets to achieve a scene change. Ask first.
+
+If a task seems to require a meta or scene change, stop and ask for permission instead of making the edit.
