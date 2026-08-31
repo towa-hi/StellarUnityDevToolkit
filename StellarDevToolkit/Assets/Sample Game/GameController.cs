@@ -18,6 +18,8 @@ public class GameController : MonoBehaviour
         GameOver
     }
 
+    const int DropSnapRangeTiles = 1;
+
     [SerializeField] Board board = null;
     [SerializeField] ShapeOfferArea offerArea = null;
     [SerializeField] InputController inputController = null;
@@ -30,6 +32,7 @@ public class GameController : MonoBehaviour
     [SerializeField] float dragYMultiplier = 2.0f;
     [SerializeField] float dragScaleDuration = 0.12f;
     [SerializeField] float dropSettleDuration = 0.12f;
+    [SerializeField] float dropSnapEdgeDistance = 0.35f;
 
     public GameState State { get; private set; } = GameState.NotStarted;
     public int Score { get; private set; }
@@ -42,6 +45,7 @@ public class GameController : MonoBehaviour
     Vector3 dragGrabOffset = Vector3.zero;
     Tween dropSettleTween = null;
     readonly List<Vector2Int> previewCoordsBuffer = new List<Vector2Int>();
+    readonly List<Vector2Int> snapNeighborCoordsBuffer = new List<Vector2Int>();
     readonly List<BoardCell> placementCellsBuffer = new List<BoardCell>();
     IntegerRng gameRandom;
 
@@ -225,10 +229,10 @@ public class GameController : MonoBehaviour
         ShapeOfferSlot sourceSlot = draggedFromSlot;
         shape.ExitDragVisualState();
 
-        if (TryGetPlacementAnchorFromHoveredCell(hoveredBoardCell, out Vector2Int anchorCoord)
-            && CanPlaceShape(shape.Definition, anchorCoord))
+        if (TryResolvePlacementCell(hoveredBoardCell, out BoardCell destinationCell)
+            && TryGetPlacementAnchorFromHoveredCell(destinationCell, out Vector2Int anchorCoord))
         {
-            BeginBoardDrop(shape, sourceSlot, hoveredBoardCell, anchorCoord);
+            BeginBoardDrop(shape, sourceSlot, destinationCell, anchorCoord);
             return;
         }
 
@@ -310,6 +314,96 @@ public class GameController : MonoBehaviour
         }
 
         anchorCoord = GameUtility.GetPlacementAnchorCoord(hoveredBoardCell.Coord);
+        return true;
+    }
+
+    bool TryResolvePlacementCell(BoardCell hoveredBoardCell, out BoardCell destinationCell)
+    {
+        destinationCell = null;
+        if (board == null || draggedShape == null)
+        {
+            return false;
+        }
+
+        ShapeDefinition definition = draggedShape.Definition;
+        if (definition == null)
+        {
+            return false;
+        }
+
+        if (TryGetPlacementAnchorFromHoveredCell(hoveredBoardCell, out Vector2Int hoverAnchor)
+            && CanPlaceShape(definition, hoverAnchor))
+        {
+            destinationCell = hoveredBoardCell;
+            return true;
+        }
+
+        Vector2 trayXY = draggedShape.transform.position;
+        if (!IsWithinDropSnapEdgeDistance(hoveredBoardCell, trayXY))
+        {
+            return false;
+        }
+
+        Vector2Int referenceCoord = hoveredBoardCell != null
+            ? hoveredBoardCell.Coord
+            : GameUtility.GetNearestCellCoord(trayXY);
+        return TryGetClosestEmptyValidDestination(definition, referenceCoord, trayXY, out destinationCell);
+    }
+
+    bool IsWithinDropSnapEdgeDistance(BoardCell hoveredBoardCell, Vector2 trayXY)
+    {
+        float edgeDistance = hoveredBoardCell != null
+            ? GameUtility.GetDistanceToNearestCellEdge(trayXY, hoveredBoardCell.Coord)
+            : GameUtility.GetDistanceOutsideBoard(trayXY);
+        return edgeDistance <= dropSnapEdgeDistance;
+    }
+
+    bool TryGetClosestEmptyValidDestination(
+        ShapeDefinition definition,
+        Vector2Int referenceCoord,
+        Vector2 trayXY,
+        out BoardCell destinationCell)
+    {
+        destinationCell = null;
+        snapNeighborCoordsBuffer.Clear();
+        GameUtility.AppendChebyshevNeighborhood(referenceCoord, DropSnapRangeTiles, snapNeighborCoordsBuffer);
+
+        BoardCell closestEmptyCell = null;
+        float closestDistSq = float.MaxValue;
+        for (int i = 0; i < snapNeighborCoordsBuffer.Count; i++)
+        {
+            Vector2Int coord = snapNeighborCoordsBuffer[i];
+            if (coord == referenceCoord
+                || !board.TryGetCell(coord, out BoardCell cell)
+                || cell == null
+                || cell.IsOccupied)
+            {
+                continue;
+            }
+
+            Vector2 cellXY = cell.transform.position;
+            float distSq = (trayXY - cellXY).sqrMagnitude;
+            if (distSq >= closestDistSq)
+            {
+                continue;
+            }
+
+            closestDistSq = distSq;
+            closestEmptyCell = cell;
+        }
+
+        if (closestEmptyCell == null)
+        {
+            return false;
+        }
+
+        Vector2Int anchorCoord = GameUtility.GetPlacementAnchorCoord(closestEmptyCell.Coord);
+        if (!CanPlaceShape(definition, anchorCoord))
+        {
+            return false;
+        }
+
+        destinationCell = closestEmptyCell;
         return true;
     }
 
@@ -423,7 +517,8 @@ public class GameController : MonoBehaviour
         }
 
         ShapeDefinition definition = draggedShape.Definition;
-        if (definition == null || !TryGetPlacementAnchorFromHoveredCell(hoveredBoardCell, out Vector2Int anchorCoord) || !CanPlaceShape(definition, anchorCoord))
+        if (definition == null || !TryResolvePlacementCell(hoveredBoardCell, out BoardCell destinationCell)
+            || !TryGetPlacementAnchorFromHoveredCell(destinationCell, out Vector2Int anchorCoord))
         {
             board.ClearPreviewHighlights();
             return;
