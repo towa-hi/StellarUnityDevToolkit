@@ -8,15 +8,8 @@ public class GameController : MonoBehaviour
 {
     public event Action<int, int> ScoreChanged;
     public event Action<int> StreakChanged;
-
-    public enum GameState
-    {
-        NotStarted,
-        WaitingForDrag,
-        DraggingShape,
-        ResolvingPlacement,
-        GameOver
-    }
+    public event Action GameOver;
+    public event Action SceneCleared;
 
     const int DropSnapRangeTiles = 1;
 
@@ -24,7 +17,6 @@ public class GameController : MonoBehaviour
     [SerializeField] ShapeOfferArea offerArea = null;
     [SerializeField] InputController inputController = null;
     [SerializeField] GameUI gameUI = null;
-    [SerializeField] Camera gameplayCamera = null;
     [SerializeField] float dragPlaneDepth = 0.0f;
     [FormerlySerializedAs("useDragYMultiplier")]
     [SerializeField] bool useDragAxisMultipliers = false;
@@ -34,11 +26,12 @@ public class GameController : MonoBehaviour
     [SerializeField] float dropSettleDuration = 0.12f;
     [SerializeField] float dropSnapEdgeDistance = 0.35f;
 
-    public GameState State { get; private set; } = GameState.NotStarted;
-    public int Score { get; private set; }
-    public int CurrentStreak { get; private set; }
-    public uint GameSeed { get; private set; }
+    public GamePhase State => gameState != null ? gameState.Phase : GamePhase.NotStarted;
+    public int Score => gameState != null ? gameState.Score : 0;
+    public int CurrentStreak => gameState != null ? gameState.CurrentStreak : 0;
+    public uint GameSeed => gameState != null ? gameState.GameSeed : 0u;
 
+    GameState gameState = null;
     ShapeTray draggedShape = null;
     ShapeOfferSlot draggedFromSlot = null;
     Vector2 dragOriginScreenCoordinate = Vector2.zero;
@@ -47,7 +40,6 @@ public class GameController : MonoBehaviour
     Tween dropSettleTween = null;
     readonly List<Vector2Int> previewCoordsBuffer = new List<Vector2Int>();
     readonly List<BoardCell> placementCellsBuffer = new List<BoardCell>();
-    IntegerRng gameRandom;
 
     void Awake()
     {
@@ -64,7 +56,7 @@ public class GameController : MonoBehaviour
 
     void Update()
     {
-        if (State == GameState.NotStarted)
+        if (State == GamePhase.NotStarted)
         {
             return;
         }
@@ -84,30 +76,58 @@ public class GameController : MonoBehaviour
             return;
         }
 
-        GameSeed = seed;
-        gameRandom = new IntegerRng(GameSeed);
+        ClearScene();
+        gameState = new GameState(seed);
+        InitializeScene();
+        gameState.Phase = GamePhase.WaitingForDrag;
+    }
 
-        CancelActiveDrag();
+    public void ClearScene()
+    {
+        KillDropSettleTween();
+        if (draggedFromSlot != null)
+        {
+            draggedFromSlot.Clear();
+        }
+
+        if (draggedShape != null)
+        {
+            Destroy(draggedShape.gameObject);
+        }
+
+        ClearDragState();
+        if (board != null)
+        {
+            board.Clear();
+        }
+
+        if (offerArea != null)
+        {
+            offerArea.Clear();
+        }
+
+        gameState = null;
+        SceneCleared?.Invoke();
+    }
+
+    void InitializeScene()
+    {
         board.InitializeBoard(GameUtility.GetBoardSize());
         if (offerArea != null)
         {
             offerArea.PopulateShapeOfferSlots(GeneratePackedShapeBatch);
         }
-
-        SetScore(0);
-        SetStreak(0);
-        State = GameState.WaitingForDrag;
     }
 
     public int[] GeneratePackedShapeBatch(int count)
     {
         int[] batch = new int[Mathf.Max(0, count)];
-        if (batch.Length == 0)
+        if (batch.Length == 0 || gameState == null)
         {
             return batch;
         }
 
-        int trominoSlotIndex = gameRandom.NextIndex(batch.Length);
+        int trominoSlotIndex = gameState.NextIndex(batch.Length);
         for (int i = 0; i < batch.Length; i++)
         {
             int[] sourceShapes = i == trominoSlotIndex
@@ -131,7 +151,7 @@ public class GameController : MonoBehaviour
             return 0;
         }
 
-        return packedShapes[gameRandom.NextIndex(packedShapes.Length)];
+        return packedShapes[gameState.NextIndex(packedShapes.Length)];
     }
 
     static uint GenerateNewGameSeed()
@@ -147,7 +167,7 @@ public class GameController : MonoBehaviour
 
     public bool TryBeginDrag(ShapeOfferSlot sourceSlot)
     {
-        if (State != GameState.WaitingForDrag || sourceSlot == null || !sourceSlot.HasShape())
+        if (State != GamePhase.WaitingForDrag || sourceSlot == null || !sourceSlot.HasShape())
         {
             return false;
         }
@@ -167,7 +187,7 @@ public class GameController : MonoBehaviour
         draggedFromSlot = sourceSlot;
         draggedShape.transform.SetParent(null, true);
         draggedShape.EnterDragVisualState(dragScaleDuration);
-        State = GameState.DraggingShape;
+        gameState.Phase = GamePhase.DraggingShape;
 
         Vector2 pointerScreen = inputController != null ? inputController.PointerScreenCoordinate : Vector2.zero;
         dragOriginScreenCoordinate = pointerScreen;
@@ -209,7 +229,7 @@ public class GameController : MonoBehaviour
 
     public void EndActiveDrag()
     {
-        if (State == GameState.ResolvingPlacement)
+        if (State == GamePhase.ResolvingPlacement)
         {
             return;
         }
@@ -294,14 +314,55 @@ public class GameController : MonoBehaviour
 
     public bool CheckForGameOver()
     {
+        if (gameState == null)
+        {
+            Debug.Log("GameController: CheckForGameOver skipped because gameState is null.", this);
+            return false;
+        }
+
         bool hasAnyMove = HasAnyValidPlacement();
+        Debug.Log($"GameController: CheckForGameOver phase={gameState.Phase} hasAnyMove={hasAnyMove} remainingOfferShapes={CountRemainingOfferShapes()} gameOverListeners={GetGameOverListenerCount()}.", this);
         if (!hasAnyMove)
         {
-            State = GameState.GameOver;
+            gameState.Phase = GamePhase.GameOver;
+            if (GameOver == null)
+            {
+                Debug.LogWarning("GameController: Game over reached but GameOver has no subscribers.", this);
+            }
+            else
+            {
+                Debug.Log("GameController: Invoking GameOver.", this);
+            }
+
+            GameOver?.Invoke();
             return true;
         }
 
         return false;
+    }
+
+    int CountRemainingOfferShapes()
+    {
+        if (offerArea == null)
+        {
+            return 0;
+        }
+
+        int count = 0;
+        foreach (ShapeOfferSlot offerSlot in offerArea.OfferSlots)
+        {
+            if (offerSlot != null && offerSlot.HasShape())
+            {
+                count++;
+            }
+        }
+
+        return count;
+    }
+
+    int GetGameOverListenerCount()
+    {
+        return GameOver == null ? 0 : GameOver.GetInvocationList().Length;
     }
 
     bool TryResolvePlacementCell(Vector2 dragCursor, out BoardCell destinationCell, out Vector2Int anchorCoord)
@@ -406,7 +467,7 @@ public class GameController : MonoBehaviour
 
     void BeginBoardDrop(ShapeTray shape, ShapeOfferSlot sourceSlot, BoardCell hoveredBoardCell, Vector2Int anchorCoord)
     {
-        State = GameState.ResolvingPlacement;
+        gameState.Phase = GamePhase.ResolvingPlacement;
         Vector3 targetPos = hoveredBoardCell.transform.position;
         targetPos.z += 0.5f;
         Quaternion targetRot = hoveredBoardCell.transform.rotation;
@@ -424,6 +485,7 @@ public class GameController : MonoBehaviour
     {
         dropSettleTween = null;
         bool placed = TryPlaceShape(shape.Definition, anchorCoord, shape);
+        Debug.Log($"GameController: CommitBoardDrop placed={placed}.", this);
         if (!placed)
         {
             BeginSlotReturn(shape, sourceSlot);
@@ -441,15 +503,17 @@ public class GameController : MonoBehaviour
             Destroy(shape.gameObject);
         }
 
-        if (!CheckForGameOver())
+        bool isGameOver = CheckForGameOver();
+        Debug.Log($"GameController: After placement isGameOver={isGameOver} phase={State}.", this);
+        if (!isGameOver && gameState != null)
         {
-            State = GameState.WaitingForDrag;
+            gameState.Phase = GamePhase.WaitingForDrag;
         }
     }
 
     void BeginSlotReturn(ShapeTray shape, ShapeOfferSlot sourceSlot)
     {
-        State = GameState.ResolvingPlacement;
+        gameState.Phase = GamePhase.ResolvingPlacement;
         if (board != null)
         {
             board.ClearPreviewHighlights();
@@ -470,7 +534,10 @@ public class GameController : MonoBehaviour
     {
         dropSettleTween = null;
         ClearDragState();
-        State = GameState.WaitingForDrag;
+        if (gameState != null)
+        {
+            gameState.Phase = GamePhase.WaitingForDrag;
+        }
     }
 
     void KillDropSettleTween()
@@ -533,7 +600,7 @@ public class GameController : MonoBehaviour
 
     void HandlePointerInput()
     {
-        if (inputController == null || State == GameState.ResolvingPlacement || State == GameState.GameOver)
+        if (inputController == null || State == GamePhase.ResolvingPlacement || State == GamePhase.GameOver)
         {
             return;
         }
@@ -606,22 +673,14 @@ public class GameController : MonoBehaviour
 
     bool TryGetDragPlanePoint(Vector2 screenCoordinate, out Vector3 worldPoint)
     {
-        if (gameplayCamera == null)
+        if (inputController == null)
         {
             worldPoint = Vector3.zero;
             return false;
         }
 
         Plane dragPlane = new Plane(Vector3.forward, new Vector3(0.0f, 0.0f, dragPlaneDepth));
-        Ray ray = gameplayCamera.ScreenPointToRay(screenCoordinate);
-        if (dragPlane.Raycast(ray, out float enterDistance))
-        {
-            worldPoint = ray.GetPoint(enterDistance);
-            return true;
-        }
-
-        worldPoint = Vector3.zero;
-        return false;
+        return inputController.TryGetWorldPointOnPlane(screenCoordinate, dragPlane, out worldPoint);
     }
 
     bool CanPlaceShape(ShapeDefinition shapeDefinition, Vector2Int anchorCoord)
@@ -762,19 +821,24 @@ public class GameController : MonoBehaviour
 
     void SetScore(int newScore)
     {
-        int scoreDifference = newScore - Score;
-        Score = newScore;
-        ScoreChanged?.Invoke(Score, scoreDifference);
-    }
-
-    void SetStreak(int newStreak)
-    {
-        if (CurrentStreak == newStreak)
+        if (gameState == null)
         {
             return;
         }
 
-        CurrentStreak = newStreak;
-        StreakChanged?.Invoke(CurrentStreak);
+        int scoreDifference = newScore - gameState.Score;
+        gameState.Score = newScore;
+        ScoreChanged?.Invoke(gameState.Score, scoreDifference);
+    }
+
+    void SetStreak(int newStreak)
+    {
+        if (gameState == null || gameState.CurrentStreak == newStreak)
+        {
+            return;
+        }
+
+        gameState.CurrentStreak = newStreak;
+        StreakChanged?.Invoke(gameState.CurrentStreak);
     }
 }

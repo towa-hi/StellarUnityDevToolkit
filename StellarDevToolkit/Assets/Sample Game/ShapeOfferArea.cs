@@ -34,6 +34,14 @@ public class ShapeOfferArea : MonoBehaviour
         return offerSlots.Contains(slot);
     }
 
+    public void Clear()
+    {
+        KillPromotion();
+        packedShapeBatchGenerator = null;
+        ClearSlots(offerSlots);
+        ClearSlots(previewSlots);
+    }
+
     public void PopulateShapeOfferSlots(Func<int, int[]> packedShapeBatchGenerator)
     {
         this.packedShapeBatchGenerator = packedShapeBatchGenerator;
@@ -157,24 +165,36 @@ public class ShapeOfferArea : MonoBehaviour
             return;
         }
 
+        ClearSlots(slots);
         List<ShapeOfferSlot> slotsToFill = new List<ShapeOfferSlot>();
         foreach (ShapeOfferSlot slot in slots)
         {
-            if (slot == null)
+            if (slot != null)
+            {
+                slotsToFill.Add(slot);
+            }
+        }
+
+        PopulateSlotsWithBatch(slotsToFill);
+    }
+
+    void ClearSlots(List<ShapeOfferSlot> slots)
+    {
+        if (slots == null)
+        {
+            return;
+        }
+
+        foreach (ShapeOfferSlot slot in slots)
+        {
+            if (slot == null || !slot.HasShape())
             {
                 continue;
             }
 
-            if (slot.HasShape())
-            {
-                Destroy(slot.CurrentShape.gameObject);
-                slot.Clear();
-            }
-
-            slotsToFill.Add(slot);
+            Destroy(slot.CurrentShape.gameObject);
+            slot.Clear();
         }
-
-        PopulateSlotsWithBatch(slotsToFill);
     }
 
     void PopulateEmptySlots(List<ShapeOfferSlot> slots, Sequence joinSequence = null)

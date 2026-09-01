@@ -5,14 +5,18 @@ public class GameUI : MonoBehaviour
     [SerializeField] DifferencePopup differencePopup = null;
     [SerializeField] TotalScorePopup totalScorePopup = null;
     [SerializeField] StreakPopup streakPopup = null;
+    [SerializeField] GameOverPopup gameOverPopup = null;
     GameController gameController = null;
 
     public void Initialize(GameController controller)
     {
         UnsubscribeFromController();
         gameController = controller;
+        ResolveGameOverPopup();
         SubscribeToController();
+        HideGameOverPopup();
         SyncScoreDisplay();
+        Debug.Log($"GameUI: Initialized. gameOverPopup={(gameOverPopup != null ? gameOverPopup.name : "null")} popupActive={(gameOverPopup != null && gameOverPopup.gameObject.activeSelf)}.", this);
     }
 
     void OnDestroy()
@@ -41,6 +45,65 @@ public class GameUI : MonoBehaviour
         }
     }
 
+    void HandleGameOver()
+    {
+        Debug.Log($"GameUI: HandleGameOver. gameOverPopup={(gameOverPopup != null ? gameOverPopup.name : "null")}.", this);
+        if (gameOverPopup != null)
+        {
+            gameOverPopup.Show();
+            return;
+        }
+
+        Debug.LogWarning("GameUI: HandleGameOver but gameOverPopup is null.", this);
+    }
+
+    void HandleSceneCleared()
+    {
+        HideGameOverPopup();
+        SyncScoreDisplay();
+    }
+
+    void ResolveGameOverPopup()
+    {
+        if (gameOverPopup != null)
+        {
+            Debug.Log($"GameUI: Using serialized GameOverPopup on '{gameOverPopup.name}'.", this);
+            return;
+        }
+
+        Transform[] children = GetComponentsInChildren<Transform>(true);
+        for (int i = 0; i < children.Length; i++)
+        {
+            if (children[i].name != "GameOver Popup")
+            {
+                continue;
+            }
+
+            gameOverPopup = children[i].GetComponent<GameOverPopup>();
+            if (gameOverPopup == null)
+            {
+                Debug.Log("GameUI: Found GameOver Popup object without component; adding GameOverPopup.", this);
+                gameOverPopup = children[i].gameObject.AddComponent<GameOverPopup>();
+            }
+            else
+            {
+                Debug.Log("GameUI: Found GameOverPopup via child search.", this);
+            }
+
+            return;
+        }
+
+        Debug.LogWarning("GameUI: Could not find GameOver Popup.", this);
+    }
+
+    void HideGameOverPopup()
+    {
+        if (gameOverPopup != null)
+        {
+            gameOverPopup.Hide();
+        }
+    }
+
     void SubscribeToController()
     {
         if (gameController == null)
@@ -52,6 +115,10 @@ public class GameUI : MonoBehaviour
         gameController.ScoreChanged += HandleScoreChanged;
         gameController.StreakChanged -= HandleStreakChanged;
         gameController.StreakChanged += HandleStreakChanged;
+        gameController.GameOver -= HandleGameOver;
+        gameController.GameOver += HandleGameOver;
+        gameController.SceneCleared -= HandleSceneCleared;
+        gameController.SceneCleared += HandleSceneCleared;
     }
 
     void UnsubscribeFromController()
@@ -63,6 +130,8 @@ public class GameUI : MonoBehaviour
 
         gameController.ScoreChanged -= HandleScoreChanged;
         gameController.StreakChanged -= HandleStreakChanged;
+        gameController.GameOver -= HandleGameOver;
+        gameController.SceneCleared -= HandleSceneCleared;
     }
 
     void SyncScoreDisplay()

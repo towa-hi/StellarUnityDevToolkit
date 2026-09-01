@@ -268,6 +268,24 @@ public class GameManager : MonoBehaviour
         NewGame();
     }
 
+    public void ReturnToPluginDemo()
+    {
+        if (gameController != null)
+        {
+            gameController.ClearScene();
+        }
+
+        if (networkUI != null)
+        {
+            networkUI.gameObject.SetActive(true);
+        }
+
+        if (transactionTracker != null)
+        {
+            transactionTracker.gameObject.SetActive(true);
+        }
+    }
+
     public void TryGetSEP50AssetBalance(string assetContractAddress, string ownerAddress = null)
     {
         _ = TryGetSEP50AssetBalanceAsync(assetContractAddress, ownerAddress);

@@ -2,16 +2,12 @@ using UnityEngine;
 
 public class InputController : MonoBehaviour
 {
-    const string BoardCellLayerName = "BoardCell";
-
     [SerializeField] Camera gameplayCamera = null;
-    [SerializeField] LayerMask boardCellLayerMask = 0;
 
     public Vector2 PointerScreenCoordinate { get; private set; }
     public bool PointerDownThisFrame { get; private set; }
     public bool PointerHeld { get; private set; }
     public bool PointerUpThisFrame { get; private set; }
-    public BoardCell HoveredBoardCell { get; private set; }
     public ShapeOfferSlot HoveredSelectionSlot { get; private set; }
 
     void Awake()
@@ -20,13 +16,6 @@ public class InputController : MonoBehaviour
         {
             gameplayCamera = Camera.main;
         }
-
-        if (LayerMask.NameToLayer(BoardCellLayerName) < 0)
-        {
-            Debug.LogWarning($"InputController: Layer '{BoardCellLayerName}' was not found. Assign boardCellLayerMask manually.", this);
-        }
-
-        EnsureBoardCellLayerMask();
     }
 
     void OnValidate()
@@ -35,60 +24,33 @@ public class InputController : MonoBehaviour
         {
             gameplayCamera = Camera.main;
         }
-
-        EnsureBoardCellLayerMask();
     }
 
     void Update()
-    {
-        UpdateHoverState();
-    }
-
-    void EnsureBoardCellLayerMask()
-    {
-        int boardCellLayerIndex = LayerMask.NameToLayer(BoardCellLayerName);
-        if (boardCellLayerIndex < 0)
-        {
-            return;
-        }
-
-        boardCellLayerMask = 1 << boardCellLayerIndex;
-    }
-
-    void UpdateHoverState()
     {
         PointerDownThisFrame = IsPointerDownThisFrame();
         PointerHeld = IsPointerHeld();
         PointerUpThisFrame = IsPointerUpThisFrame();
         PointerScreenCoordinate = GetPointerScreenCoordinate();
-        HoveredBoardCell = TryGetHoveredBoardCell(out BoardCell boardCell) ? boardCell : null;
         HoveredSelectionSlot = TryGetHoveredSelectionSlot(out ShapeOfferSlot slot) ? slot : null;
     }
 
-    public bool TryGetBoardCellAtScreenCoordinate(Vector2 screenCoordinate, out BoardCell boardCell)
+    public bool TryGetWorldPointOnPlane(Vector2 screenCoordinate, Plane plane, out Vector3 worldPoint)
     {
-        boardCell = null;
+        worldPoint = Vector3.zero;
         if (gameplayCamera == null)
         {
             return false;
         }
 
         Ray ray = gameplayCamera.ScreenPointToRay(screenCoordinate);
-        if (Physics.Raycast(ray, out RaycastHit hitInfo, float.MaxValue, boardCellLayerMask))
+        if (!plane.Raycast(ray, out float enterDistance))
         {
-            boardCell = hitInfo.collider.GetComponentInParent<BoardCell>();
-            if (boardCell != null)
-            {
-                return true;
-            }
+            return false;
         }
 
-        return false;
-    }
-
-    bool TryGetHoveredBoardCell(out BoardCell boardCell)
-    {
-        return TryGetBoardCellAtScreenCoordinate(PointerScreenCoordinate, out boardCell);
+        worldPoint = ray.GetPoint(enterDistance);
+        return true;
     }
 
     bool TryGetHoveredSelectionSlot(out ShapeOfferSlot slot)

@@ -7,9 +7,23 @@ public class Board : MonoBehaviour
     readonly Dictionary<Vector2Int, BoardCell> boardCells = new Dictionary<Vector2Int, BoardCell>();
     readonly HashSet<BoardCell> highlightedBoardCells = new HashSet<BoardCell>();
 
-    public void InitializeBoard(Vector2Int size)
+    public void Clear()
     {
         ClearPreviewHighlights();
+        foreach (KeyValuePair<Vector2Int, BoardCell> boardCell in boardCells)
+        {
+            if (boardCell.Value != null)
+            {
+                Destroy(boardCell.Value.gameObject);
+            }
+        }
+
+        boardCells.Clear();
+    }
+
+    public void InitializeBoard(Vector2Int size)
+    {
+        Clear();
         if (slotPrefab == null)
         {
             Debug.LogWarning("Board: slotPrefab is missing.", this);
@@ -22,12 +36,6 @@ public class Board : MonoBehaviour
             return;
         }
 
-        foreach (KeyValuePair<Vector2Int, BoardCell> boardCell in boardCells)
-        {
-            Destroy(boardCell.Value.gameObject);
-        }
-
-        boardCells.Clear();
         for (int x = 0; x < size.x; x++)
         {
             for (int y = 0; y < size.y; y++)
