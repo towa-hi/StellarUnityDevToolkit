@@ -1,10 +1,8 @@
 using UnityEngine;
-using System.Collections.Generic;
 
 public static class GameUtility
 {
-    public const float BoardCellSize = 1.0f;
-
+    const float BoardCellSize = 1.0f;
     const int BasePointsPerLine = 10;
     const int StreakSoftener = 4;
     const int MaxStreakBonusPercent = 150;
@@ -51,64 +49,55 @@ public static class GameUtility
         return (lineScore * multiplierPercent) / 100;
     }
 
-    public static Vector2Int GetNearestCellCoord(Vector2 worldXY, float cellSize = BoardCellSize)
+    public static Vector2Int GetCellCoord(Vector2 boardPosition)
     {
         return new Vector2Int(
-            Mathf.RoundToInt(worldXY.x / cellSize),
-            Mathf.RoundToInt(worldXY.y / cellSize));
+            Mathf.RoundToInt(boardPosition.x / BoardCellSize),
+            Mathf.RoundToInt(boardPosition.y / BoardCellSize));
     }
 
-    public static float GetDistanceToNearestCellEdge(Vector2 worldXY, Vector2Int cellCoord, float cellSize = BoardCellSize)
+    public static Vector2 GetCellCenter(Vector2Int cellCoord)
     {
-        float half = cellSize * 0.5f;
-        float localX = worldXY.x - cellCoord.x * cellSize;
-        float localY = worldXY.y - cellCoord.y * cellSize;
-        float distToVerticalEdge = half - Mathf.Abs(localX);
-        float distToHorizontalEdge = half - Mathf.Abs(localY);
+        return new Vector2(cellCoord.x, cellCoord.y) * BoardCellSize;
+    }
+
+    public static bool IsOnBoard(Vector2Int cellCoord)
+    {
+        return cellCoord.x >= 0 && cellCoord.x < BlockBlastConstants.BoardSize
+            && cellCoord.y >= 0 && cellCoord.y < BlockBlastConstants.BoardSize;
+    }
+
+    public static float GetDistanceToNearestCellEdge(Vector2 boardPosition, Vector2Int cellCoord)
+    {
+        Vector2 local = boardPosition - GetCellCenter(cellCoord);
+        float half = BoardCellSize * 0.5f;
+        float distToVerticalEdge = half - Mathf.Abs(local.x);
+        float distToHorizontalEdge = half - Mathf.Abs(local.y);
         return Mathf.Max(0.0f, Mathf.Min(distToVerticalEdge, distToHorizontalEdge));
     }
 
-    public static float GetDistanceOutsideBoard(Vector2 worldXY, int boardSize = BlockBlastConstants.BoardSize, float cellSize = BoardCellSize)
+    public static float GetDistanceOutsideBoard(Vector2 boardPosition)
     {
-        float min = -cellSize * 0.5f;
-        float max = (boardSize - 1) * cellSize + cellSize * 0.5f;
-
-        float dx = 0.0f;
-        if (worldXY.x < min)
-        {
-            dx = min - worldXY.x;
-        }
-        else if (worldXY.x > max)
-        {
-            dx = worldXY.x - max;
-        }
-
-        float dy = 0.0f;
-        if (worldXY.y < min)
-        {
-            dy = min - worldXY.y;
-        }
-        else if (worldXY.y > max)
-        {
-            dy = worldXY.y - max;
-        }
-
+        float half = BoardCellSize * 0.5f;
+        float min = -half;
+        float max = (BlockBlastConstants.BoardSize - 1) * BoardCellSize + half;
+        float dx = DistanceOutsideRange(boardPosition.x, min, max);
+        float dy = DistanceOutsideRange(boardPosition.y, min, max);
         return Mathf.Sqrt(dx * dx + dy * dy);
     }
 
-    public static void AppendChebyshevNeighborhood(Vector2Int origin, int range, List<Vector2Int> results)
+    static float DistanceOutsideRange(float value, float min, float max)
     {
-        if (results == null || range < 0)
+        if (value < min)
         {
-            return;
+            return min - value;
         }
 
-        for (int y = origin.y - range; y <= origin.y + range; y++)
+        if (value > max)
         {
-            for (int x = origin.x - range; x <= origin.x + range; x++)
-            {
-                results.Add(new Vector2Int(x, y));
-            }
+            return value - max;
         }
+
+        return 0.0f;
     }
 }

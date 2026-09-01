@@ -8710,6 +8710,7 @@ MonoBehaviour:
   dragYMultiplier: 2
   dragScaleDuration: 0.22
   dropSettleDuration: 0.22
+  dropSnapEdgeDistance: 0.35
 --- !u!1001 &1616821367
 PrefabInstance:
   m_ObjectHideFlags: 0

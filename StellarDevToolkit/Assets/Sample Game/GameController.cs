@@ -42,10 +42,10 @@ public class GameController : MonoBehaviour
     ShapeTray draggedShape = null;
     ShapeOfferSlot draggedFromSlot = null;
     Vector2 dragOriginScreenCoordinate = Vector2.zero;
-    Vector3 dragGrabOffset = Vector3.zero;
+    Vector2 dragGrabOffset = Vector2.zero;
+    Vector2 dragCursorBoardPosition = Vector2.zero;
     Tween dropSettleTween = null;
     readonly List<Vector2Int> previewCoordsBuffer = new List<Vector2Int>();
-    readonly List<Vector2Int> snapNeighborCoordsBuffer = new List<Vector2Int>();
     readonly List<BoardCell> placementCellsBuffer = new List<BoardCell>();
     IntegerRng gameRandom;
 
@@ -171,23 +171,24 @@ public class GameController : MonoBehaviour
 
         Vector2 pointerScreen = inputController != null ? inputController.PointerScreenCoordinate : Vector2.zero;
         dragOriginScreenCoordinate = pointerScreen;
-        if (TryGetDragWorldPoint(pointerScreen, out Vector3 dragPoint))
+        dragGrabOffset = Vector2.zero;
+        if (TryGetPointerBoardPosition(pointerScreen, out Vector2 pointerBoardPosition))
         {
-            Vector3 trayPos = draggedShape.transform.position;
-            dragGrabOffset = new Vector3(trayPos.x - dragPoint.x, trayPos.y - dragPoint.y, 0.0f);
-            draggedShape.SetWorldDragPosition(ApplyDragGrabOffset(dragPoint));
-            UpdateHoveredBoardCellPreview(ResolveDragHoverCell(pointerScreen));
+            Vector2 trayXY = draggedShape.transform.position;
+            dragGrabOffset = trayXY - pointerBoardPosition;
+            SetDragCursorBoardPosition(trayXY);
         }
         else
         {
-            dragGrabOffset = Vector3.zero;
-            UpdateHoveredBoardCellPreview(null);
+            dragCursorBoardPosition = Vector2.zero;
         }
+
+        UpdateHoveredBoardCellPreview();
 
         return true;
     }
 
-    public void UpdateActiveDrag(Vector2 screenCoordinate, BoardCell hoveredBoardCell)
+    public void UpdateActiveDrag(Vector2 screenCoordinate)
     {
         if (draggedShape == null)
         {
@@ -198,16 +199,15 @@ public class GameController : MonoBehaviour
             return;
         }
 
-        if (TryGetDragWorldPoint(screenCoordinate, out Vector3 dragPoint))
+        if (TryGetDragCursorBoardPosition(screenCoordinate, out Vector2 dragCursor))
         {
-            draggedShape.SetWorldDragPosition(ApplyDragGrabOffset(dragPoint));
-            hoveredBoardCell = ResolveDragHoverCell(screenCoordinate, hoveredBoardCell);
+            SetDragCursorBoardPosition(dragCursor);
         }
 
-        UpdateHoveredBoardCellPreview(hoveredBoardCell);
+        UpdateHoveredBoardCellPreview();
     }
 
-    public void EndActiveDrag(BoardCell hoveredBoardCell)
+    public void EndActiveDrag()
     {
         if (State == GameState.ResolvingPlacement)
         {
@@ -220,17 +220,16 @@ public class GameController : MonoBehaviour
             return;
         }
 
-        if (inputController != null)
+        if (inputController != null && TryGetDragCursorBoardPosition(inputController.PointerScreenCoordinate, out Vector2 dragCursor))
         {
-            hoveredBoardCell = ResolveDragHoverCell(inputController.PointerScreenCoordinate, hoveredBoardCell);
+            SetDragCursorBoardPosition(dragCursor);
         }
 
         ShapeTray shape = draggedShape;
         ShapeOfferSlot sourceSlot = draggedFromSlot;
         shape.ExitDragVisualState();
 
-        if (TryResolvePlacementCell(hoveredBoardCell, out BoardCell destinationCell)
-            && TryGetPlacementAnchorFromHoveredCell(destinationCell, out Vector2Int anchorCoord))
+        if (TryResolvePlacementCell(dragCursorBoardPosition, out BoardCell destinationCell, out Vector2Int anchorCoord))
         {
             BeginBoardDrop(shape, sourceSlot, destinationCell, anchorCoord);
             return;
@@ -305,21 +304,10 @@ public class GameController : MonoBehaviour
         return false;
     }
 
-    bool TryGetPlacementAnchorFromHoveredCell(BoardCell hoveredBoardCell, out Vector2Int anchorCoord)
-    {
-        if (hoveredBoardCell == null)
-        {
-            anchorCoord = default;
-            return false;
-        }
-
-        anchorCoord = GameUtility.GetPlacementAnchorCoord(hoveredBoardCell.Coord);
-        return true;
-    }
-
-    bool TryResolvePlacementCell(BoardCell hoveredBoardCell, out BoardCell destinationCell)
+    bool TryResolvePlacementCell(Vector2 dragCursor, out BoardCell destinationCell, out Vector2Int anchorCoord)
     {
         destinationCell = null;
+        anchorCoord = default;
         if (board == null || draggedShape == null)
         {
             return false;
@@ -331,65 +319,67 @@ public class GameController : MonoBehaviour
             return false;
         }
 
-        if (TryGetPlacementAnchorFromHoveredCell(hoveredBoardCell, out Vector2Int hoverAnchor)
-            && CanPlaceShape(definition, hoverAnchor))
+        Vector2Int cursorCell = GameUtility.GetCellCoord(dragCursor);
+        if (board.TryGetCell(cursorCell, out BoardCell hoveredCell))
         {
-            destinationCell = hoveredBoardCell;
-            return true;
+            Vector2Int hoverAnchor = GameUtility.GetPlacementAnchorCoord(cursorCell);
+            if (CanPlaceShape(definition, hoverAnchor))
+            {
+                destinationCell = hoveredCell;
+                anchorCoord = hoverAnchor;
+                return true;
+            }
         }
 
-        Vector2 trayXY = draggedShape.transform.position;
-        if (!IsWithinDropSnapEdgeDistance(hoveredBoardCell, trayXY))
+        if (!IsWithinDropSnapEdgeDistance(dragCursor, cursorCell))
         {
             return false;
         }
 
-        Vector2Int referenceCoord = hoveredBoardCell != null
-            ? hoveredBoardCell.Coord
-            : GameUtility.GetNearestCellCoord(trayXY);
-        return TryGetClosestEmptyValidDestination(definition, referenceCoord, trayXY, out destinationCell);
+        return TryGetNearestEmptyNeighborDestination(definition, cursorCell, dragCursor, out destinationCell, out anchorCoord);
     }
 
-    bool IsWithinDropSnapEdgeDistance(BoardCell hoveredBoardCell, Vector2 trayXY)
+    bool IsWithinDropSnapEdgeDistance(Vector2 dragCursor, Vector2Int cursorCell)
     {
-        float edgeDistance = hoveredBoardCell != null
-            ? GameUtility.GetDistanceToNearestCellEdge(trayXY, hoveredBoardCell.Coord)
-            : GameUtility.GetDistanceOutsideBoard(trayXY);
+        float edgeDistance = GameUtility.IsOnBoard(cursorCell)
+            ? GameUtility.GetDistanceToNearestCellEdge(dragCursor, cursorCell)
+            : GameUtility.GetDistanceOutsideBoard(dragCursor);
         return edgeDistance <= dropSnapEdgeDistance;
     }
 
-    bool TryGetClosestEmptyValidDestination(
+    bool TryGetNearestEmptyNeighborDestination(
         ShapeDefinition definition,
         Vector2Int referenceCoord,
-        Vector2 trayXY,
-        out BoardCell destinationCell)
+        Vector2 dragCursor,
+        out BoardCell destinationCell,
+        out Vector2Int anchorCoord)
     {
         destinationCell = null;
-        snapNeighborCoordsBuffer.Clear();
-        GameUtility.AppendChebyshevNeighborhood(referenceCoord, DropSnapRangeTiles, snapNeighborCoordsBuffer);
+        anchorCoord = default;
 
         BoardCell closestEmptyCell = null;
         float closestDistSq = float.MaxValue;
-        for (int i = 0; i < snapNeighborCoordsBuffer.Count; i++)
+        for (int y = referenceCoord.y - DropSnapRangeTiles; y <= referenceCoord.y + DropSnapRangeTiles; y++)
         {
-            Vector2Int coord = snapNeighborCoordsBuffer[i];
-            if (coord == referenceCoord
-                || !board.TryGetCell(coord, out BoardCell cell)
-                || cell == null
-                || cell.IsOccupied)
+            for (int x = referenceCoord.x - DropSnapRangeTiles; x <= referenceCoord.x + DropSnapRangeTiles; x++)
             {
-                continue;
-            }
+                Vector2Int coord = new Vector2Int(x, y);
+                if (coord == referenceCoord
+                    || !board.TryGetCell(coord, out BoardCell cell)
+                    || cell.IsOccupied)
+                {
+                    continue;
+                }
 
-            Vector2 cellXY = cell.transform.position;
-            float distSq = (trayXY - cellXY).sqrMagnitude;
-            if (distSq >= closestDistSq)
-            {
-                continue;
-            }
+                float distSq = (GameUtility.GetCellCenter(coord) - dragCursor).sqrMagnitude;
+                if (distSq >= closestDistSq)
+                {
+                    continue;
+                }
 
-            closestDistSq = distSq;
-            closestEmptyCell = cell;
+                closestDistSq = distSq;
+                closestEmptyCell = cell;
+            }
         }
 
         if (closestEmptyCell == null)
@@ -397,13 +387,14 @@ public class GameController : MonoBehaviour
             return false;
         }
 
-        Vector2Int anchorCoord = GameUtility.GetPlacementAnchorCoord(closestEmptyCell.Coord);
-        if (!CanPlaceShape(definition, anchorCoord))
+        Vector2Int neighborAnchor = GameUtility.GetPlacementAnchorCoord(closestEmptyCell.Coord);
+        if (!CanPlaceShape(definition, neighborAnchor))
         {
             return false;
         }
 
         destinationCell = closestEmptyCell;
+        anchorCoord = neighborAnchor;
         return true;
     }
 
@@ -502,10 +493,11 @@ public class GameController : MonoBehaviour
         draggedShape = null;
         draggedFromSlot = null;
         dragOriginScreenCoordinate = Vector2.zero;
-        dragGrabOffset = Vector3.zero;
+        dragGrabOffset = Vector2.zero;
+        dragCursorBoardPosition = Vector2.zero;
     }
 
-    void UpdateHoveredBoardCellPreview(BoardCell hoveredBoardCell)
+    void UpdateHoveredBoardCellPreview()
     {
         if (draggedShape == null || board == null)
         {
@@ -517,8 +509,7 @@ public class GameController : MonoBehaviour
         }
 
         ShapeDefinition definition = draggedShape.Definition;
-        if (definition == null || !TryResolvePlacementCell(hoveredBoardCell, out BoardCell destinationCell)
-            || !TryGetPlacementAnchorFromHoveredCell(destinationCell, out Vector2Int anchorCoord))
+        if (definition == null || !TryResolvePlacementCell(dragCursorBoardPosition, out _, out Vector2Int anchorCoord))
         {
             board.ClearPreviewHighlights();
             return;
@@ -559,20 +550,46 @@ public class GameController : MonoBehaviour
 
         if (inputController.PointerHeld)
         {
-            UpdateActiveDrag(inputController.PointerScreenCoordinate, inputController.HoveredBoardCell);
+            UpdateActiveDrag(inputController.PointerScreenCoordinate);
         }
 
         if (inputController.PointerUpThisFrame)
         {
-            EndActiveDrag(inputController.HoveredBoardCell);
+            EndActiveDrag();
         }
     }
 
-    Vector3 ApplyDragGrabOffset(Vector3 dragPoint)
+    void SetDragCursorBoardPosition(Vector2 boardPosition)
     {
-        dragPoint.x += dragGrabOffset.x;
-        dragPoint.y += dragGrabOffset.y;
-        return dragPoint;
+        dragCursorBoardPosition = boardPosition;
+        if (draggedShape != null)
+        {
+            draggedShape.SetWorldDragPosition(new Vector3(boardPosition.x, boardPosition.y, 0.0f));
+        }
+    }
+
+    bool TryGetDragCursorBoardPosition(Vector2 screenCoordinate, out Vector2 boardPosition)
+    {
+        if (!TryGetPointerBoardPosition(screenCoordinate, out Vector2 pointerBoardPosition))
+        {
+            boardPosition = default;
+            return false;
+        }
+
+        boardPosition = pointerBoardPosition + dragGrabOffset;
+        return true;
+    }
+
+    bool TryGetPointerBoardPosition(Vector2 screenCoordinate, out Vector2 boardPosition)
+    {
+        if (!TryGetDragPlanePoint(GetMappedDragScreenCoordinate(screenCoordinate), out Vector3 worldPoint))
+        {
+            boardPosition = default;
+            return false;
+        }
+
+        boardPosition = new Vector2(worldPoint.x, worldPoint.y);
+        return true;
     }
 
     Vector2 GetMappedDragScreenCoordinate(Vector2 screenCoordinate)
@@ -585,30 +602,6 @@ public class GameController : MonoBehaviour
         }
 
         return screenCoordinate;
-    }
-
-    bool TryGetDragWorldPoint(Vector2 screenCoordinate, out Vector3 worldPoint)
-    {
-        return TryGetDragPlanePoint(GetMappedDragScreenCoordinate(screenCoordinate), out worldPoint);
-    }
-
-    BoardCell ResolveDragHoverCell(Vector2 screenCoordinate, BoardCell pointerHoveredCell = null)
-    {
-        if (!useDragAxisMultipliers)
-        {
-            return pointerHoveredCell != null
-                ? pointerHoveredCell
-                : (inputController != null ? inputController.HoveredBoardCell : null);
-        }
-
-        if (inputController == null)
-        {
-            return null;
-        }
-
-        return inputController.TryGetBoardCellAtScreenCoordinate(GetMappedDragScreenCoordinate(screenCoordinate), out BoardCell hoverCell)
-            ? hoverCell
-            : null;
     }
 
     bool TryGetDragPlanePoint(Vector2 screenCoordinate, out Vector3 worldPoint)
