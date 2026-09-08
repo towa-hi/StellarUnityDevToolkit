@@ -1,32 +1,30 @@
-// Packed move layout (one u64, little-endian bit fields).
+// Packed move layout (one byte).
 // Rust unpack:
-//   let shape = packed as u32;
-//   let x = ((packed >> 32) as u8) as i8;
-//   let y = ((packed >> 40) as u8) as i8;
+//   let tray = packed & 0b11;
+//   let x = (packed >> 2) & 0b111;
+//   let y = (packed >> 5) & 0b111;
 //
-// bits 0-31:  shape type = ShapeDefinition.PackedShapeData (u32)
-// bits 32-39: drop x as i8 (two's complement)
-// bits 40-47: drop y as i8 (two's complement)
-// bits 48-63: reserved 0
+// bits 0-1: tray index 0|1|2
+// bits 2-4: drop cell x (0-7)
+// bits 5-7: drop cell y (0-7)
 public static class GameMovePacking
 {
-    const int ShapeBitCount = 32;
-    const int CoordBitCount = 8;
-    const ulong ShapeMask = 0xFFFFFFFFul;
-    const ulong CoordMask = 0xFFul;
+    const int TrayBitCount = 2;
+    const int CoordBitCount = 3;
+    const int TrayMask = 0b11;
+    const int CoordMask = 0b111;
 
-    public static ulong Pack(int x, int y, int packedShapeData)
+    public static byte Pack(int cellX, int cellY, int trayIndex)
     {
-        ulong packed = (uint)packedShapeData;
-        packed |= (ulong)unchecked((byte)(sbyte)x) << ShapeBitCount;
-        packed |= (ulong)unchecked((byte)(sbyte)y) << (ShapeBitCount + CoordBitCount);
-        return packed;
+        return (byte)((trayIndex & TrayMask)
+            | ((cellX & CoordMask) << TrayBitCount)
+            | ((cellY & CoordMask) << (TrayBitCount + CoordBitCount)));
     }
 
-    public static void Unpack(ulong packed, out int x, out int y, out int packedShapeData)
+    public static void Unpack(byte packed, out int cellX, out int cellY, out int trayIndex)
     {
-        packedShapeData = (int)(packed & ShapeMask);
-        x = unchecked((sbyte)((packed >> ShapeBitCount) & CoordMask));
-        y = unchecked((sbyte)((packed >> (ShapeBitCount + CoordBitCount)) & CoordMask));
+        trayIndex = packed & TrayMask;
+        cellX = (packed >> TrayBitCount) & CoordMask;
+        cellY = (packed >> (TrayBitCount + CoordBitCount)) & CoordMask;
     }
 }

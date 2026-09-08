@@ -34,6 +34,11 @@ public class ShapeOfferArea : MonoBehaviour
         return offerSlots.Contains(slot);
     }
 
+    public int OfferSlotIndex(ShapeOfferSlot slot)
+    {
+        return offerSlots.IndexOf(slot);
+    }
+
     public void Clear()
     {
         KillPromotion();

@@ -1,10 +1,9 @@
-use crate::{unpack_move, Error, GameLog, Move, PackedMoves};
-use soroban_sdk::{Env, Vec};
+use crate::{unpack_move, Error, GameLog, Move, PackedMoves, ShapeCatalogs};
+use soroban_sdk::{Bytes, Env, Vec};
 
 const BOARD_SIZE: i32 = 8;
 const SHAPE_GRID_SIZE: i32 = 5;
 const TRAY_SIZE: usize = 3;
-#[cfg(test)]
 const PIVOT_OFFSET: i32 = 2;
 const FOOTPRINT_BIT_COUNT: u32 = 25;
 const FOOTPRINT_MASK: u32 = (1 << FOOTPRINT_BIT_COUNT) - 1;
@@ -92,18 +91,20 @@ impl Sim {
     }
 
     fn apply_move(&mut self, mv: &Move) -> Result<(), Error> {
-        let slot = self
-            .offer
-            .iter()
-            .position(|shape| *shape == Some(mv.shape))
-            .ok_or(Error::InvalidGameLog)?;
-        if !can_place(self.board, mv.shape, mv.x, mv.y) {
+        let slot = mv.tray as usize;
+        if slot >= TRAY_SIZE {
+            return Err(Error::InvalidGameLog);
+        }
+        let shape = self.offer[slot].ok_or(Error::InvalidGameLog)?;
+        let anchor_x = mv.x - PIVOT_OFFSET;
+        let anchor_y = mv.y - PIVOT_OFFSET;
+        if !can_place(self.board, shape, anchor_x, anchor_y) {
             return Err(Error::InvalidGameLog);
         }
 
         let mut placed_tiles = 0u64;
-        for_each_tile(mv.shape, |lx, ly| {
-            placed_tiles |= cell_mask(mv.x + lx, mv.y + ly);
+        for_each_tile(shape, |lx, ly| {
+            placed_tiles |= cell_mask(anchor_x + lx, anchor_y + ly);
             true
         });
 
@@ -133,16 +134,19 @@ impl Sim {
 
     #[cfg(test)]
     fn first_valid_move(&self) -> Option<Move> {
-        for shape in self.offer.iter().flatten() {
+        for (slot, shape) in self.offer.iter().enumerate() {
+            let Some(shape) = shape else {
+                continue;
+            };
             for y in 0..BOARD_SIZE {
                 for x in 0..BOARD_SIZE {
                     let ax = x - PIVOT_OFFSET;
                     let ay = y - PIVOT_OFFSET;
                     if can_place(self.board, *shape, ax, ay) {
                         return Some(Move {
-                            x: ax,
-                            y: ay,
-                            shape: *shape,
+                            x,
+                            y,
+                            tray: slot as u32,
                         });
                     }
                 }
@@ -250,20 +254,47 @@ fn placement_score(cleared_lines: i32, streak: i32) -> u32 {
     ((line_score * multiplier_percent) / 100) as u32
 }
 
-pub(crate) fn pack_move(x: i32, y: i32, shape: u32) -> u64 {
-    let mut packed = shape as u64;
-    packed |= (x as i8 as u8 as u64) << 32;
-    packed |= (y as i8 as u8 as u64) << 40;
-    packed
+pub(crate) fn pack_move(cell_x: i32, cell_y: i32, tray: u32) -> u8 {
+    (tray & 0b11) as u8 | ((cell_x as u8 & 0b111) << 2) | ((cell_y as u8 & 0b111) << 5)
+}
+
+pub(crate) fn shape_catalogs(e: &Env, _seed: u64) -> ShapeCatalogs {
+    let mut trominos = Vec::new(e);
+    for shape in TROMINO_PACKED_SHAPES {
+        trominos.push_back(shape);
+    }
+    let mut tetrominos = Vec::new(e);
+    for shape in TETROMINO_PACKED_SHAPES {
+        tetrominos.push_back(shape);
+    }
+    ShapeCatalogs {
+        trominos,
+        tetrominos,
+    }
+}
+
+// Offer batches are determined by seed and move count: two batches at start,
+// then one more preview batch after every three placements (2 + n/3).
+#[cfg(test)]
+pub(crate) fn precompute_offer_batches(seed: u64, move_count: u32) -> u32 {
+    let mut rng = IntegerRng::new(seed as u32);
+    let batch_count = 2 + move_count / TRAY_SIZE as u32;
+    for _ in 0..batch_count {
+        let _ = generate_batch(&mut rng, TRAY_SIZE);
+    }
+    rng.state
 }
 
 pub(crate) fn validate_game_log(game_log: &GameLog) -> Result<u32, Error> {
-    let mut sim = Sim::new(game_log.seed);
-    if game_log.packed_moves.packed.len() > MAX_REPLAY_MOVES {
+    let packed = &game_log.packed_moves.packed;
+    let move_count = packed.len();
+    if move_count > MAX_REPLAY_MOVES {
         return Err(Error::InvalidGameLog);
     }
-    for packed in game_log.packed_moves.packed.iter() {
-        sim.apply_move(&unpack_move(packed))?;
+    let mut sim = Sim::new(game_log.seed);
+    for i in 0..move_count {
+        let packed_byte = packed.get(i).ok_or(Error::InvalidGameLog)?;
+        sim.apply_move(&unpack_move(packed_byte))?;
     }
     // A log that stops before the board is stuck is accepted: the score only ever
     // accumulates, so a short replay can only score lower than the full game.
@@ -273,14 +304,14 @@ pub(crate) fn validate_game_log(game_log: &GameLog) -> Result<u32, Error> {
 #[cfg(test)]
 pub(crate) fn greedy_game_log(e: &Env, seed: u64) -> GameLog {
     let mut sim = Sim::new(seed);
-    let mut packed = Vec::new(e);
+    let mut packed = Bytes::new(e);
     let mut guard = 0u32;
     while guard < MAX_REPLAY_MOVES {
         guard += 1;
         let Some(mv) = sim.first_valid_move() else {
             break;
         };
-        packed.push_back(pack_move(mv.x, mv.y, mv.shape));
+        packed.push_back(pack_move(mv.x, mv.y, mv.tray));
         sim.apply_move(&mv).expect("greedy move must be legal");
     }
     GameLog {
@@ -288,6 +319,37 @@ pub(crate) fn greedy_game_log(e: &Env, seed: u64) -> GameLog {
         packed_moves: PackedMoves { packed },
         seed,
         submitted_ledger_seq: u64::MAX,
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn recapture_legacy_unity_log(e: &Env, seed: u64, legacy: &[u64]) -> GameLog {
+    let mut sim = Sim::new(seed);
+    let mut packed = Bytes::new(e);
+    for old in legacy {
+        let shape = *old as u32;
+        let anchor_x = ((*old >> 32) as u8) as i8 as i32;
+        let anchor_y = ((*old >> 40) as u8) as i8 as i32;
+        let cell_x = anchor_x + PIVOT_OFFSET;
+        let cell_y = anchor_y + PIVOT_OFFSET;
+        let tray = sim
+            .offer
+            .iter()
+            .position(|slot| *slot == Some(shape))
+            .expect("legacy shape must still be in the offer") as u32;
+        let mv = Move {
+            x: cell_x,
+            y: cell_y,
+            tray,
+        };
+        packed.push_back(pack_move(cell_x, cell_y, tray));
+        sim.apply_move(&mv).expect("legacy move must be legal");
+    }
+    GameLog {
+        final_score: sim.score,
+        packed_moves: PackedMoves { packed },
+        seed,
+        submitted_ledger_seq: 0,
     }
 }
 

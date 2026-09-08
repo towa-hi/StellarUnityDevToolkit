@@ -18,6 +18,12 @@ public static class GameUtility
         return hoveredCoord - new Vector2Int(pivotOffset, pivotOffset);
     }
 
+    public static Vector2Int GetDropCellCoord(Vector2Int anchorCoord, int shapeGridSize = ShapeDefinition.GridSize)
+    {
+        int pivotOffset = shapeGridSize / 2;
+        return anchorCoord + new Vector2Int(pivotOffset, pivotOffset);
+    }
+
     public static Vector2Int GetPlacementTargetCoord(Vector2Int anchorCoord, Vector2Int tileOffset)
     {
         return anchorCoord + tileOffset;

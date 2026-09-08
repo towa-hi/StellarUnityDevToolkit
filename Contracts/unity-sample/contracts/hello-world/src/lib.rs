@@ -33,16 +33,15 @@ pub struct GameLog {
     pub submitted_ledger_seq: u64,
 }
 
-// Packed move list matching C# GameState.PackedMoves (List<ulong>).
-// Each u64:
-//   bits 0-31:  shape type = ShapeDefinition.PackedShapeData (u32)
-//   bits 32-39: drop x as i8 (two's complement)
-//   bits 40-47: drop y as i8 (two's complement)
-//   bits 48-63: reserved 0
+// Packed move list matching C# GameState.PackedMoves (List<byte>).
+// Each byte:
+//   bits 0-1: tray index 0|1|2
+//   bits 2-4: drop cell x (0-7)
+//   bits 5-7: drop cell y (0-7)
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PackedMoves {
-    pub packed: Vec<u64>,
+    pub packed: Bytes,
 }
 
 #[contracttype]
@@ -50,14 +49,21 @@ pub struct PackedMoves {
 pub struct Move {
     pub x: i32,
     pub y: i32,
-    pub shape: u32,
+    pub tray: u32,
 }
 
-pub fn unpack_move(packed: u64) -> Move {
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ShapeCatalogs {
+    pub trominos: Vec<u32>,
+    pub tetrominos: Vec<u32>,
+}
+
+pub fn unpack_move(packed: u8) -> Move {
     Move {
-        shape: packed as u32,
-        x: ((packed >> 32) as u8) as i8 as i32,
-        y: ((packed >> 40) as u8) as i8 as i32,
+        tray: (packed & 0b11) as u32,
+        x: ((packed >> 2) & 0b111) as i32,
+        y: ((packed >> 5) & 0b111) as i32,
     }
 }
 
@@ -187,6 +193,10 @@ impl Contract {
             .persistent()
             .get(&DataKey::GameLog(address))
             .unwrap_or_else(|| Vec::new(e))
+    }
+
+    pub fn start_game_check(e: &Env, seed: u64) -> ShapeCatalogs {
+        game::shape_catalogs(e, seed)
     }
 
     pub fn packed_moves_to_moves(e: &Env, packed_moves: PackedMoves) -> Vec<Move> {

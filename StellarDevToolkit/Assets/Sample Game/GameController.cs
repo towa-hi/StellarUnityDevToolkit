@@ -2,6 +2,7 @@ using UnityEngine;
 using UnityEngine.Serialization;
 using System.Collections.Generic;
 using System;
+using System.Linq;
 using System.Threading.Tasks;
 using DG.Tweening;
 using Stellar;
@@ -45,6 +46,7 @@ public class GameController : MonoBehaviour
     readonly List<Vector2Int> previewCoordsBuffer = new List<Vector2Int>();
     readonly List<BoardCell> placementCellsBuffer = new List<BoardCell>();
     bool isSubmittingGameLog = false;
+    bool isStartingGame = false;
 
     void Awake()
     {
@@ -73,18 +75,43 @@ public class GameController : MonoBehaviour
         StartNewGame(GenerateNewGameSeed());
     }
 
-    public void StartNewGame(uint seed)
+    public async void StartNewGame(uint seed)
     {
+        if (isStartingGame)
+        {
+            return;
+        }
+
         if (board == null)
         {
             Debug.LogWarning("GameController: Cannot start game without Board.", this);
             return;
         }
 
-        ClearScene();
-        gameState = new GameState(seed);
-        InitializeScene();
-        gameState.Phase = GamePhase.WaitingForDrag;
+        isStartingGame = true;
+        try
+        {
+            ClearScene();
+            gameState = new GameState(seed);
+            gameState.Phase = GamePhase.NotStarted;
+            if (TryGetLiveNetworkContext(out NetworkContext context))
+            {
+                bool loaded = await TryLoadShapeCatalogsFromContract(context, seed);
+                if (!loaded)
+                {
+                    Debug.LogError("GameController: start_game_check failed; not starting.", this);
+                    gameState = null;
+                    return;
+                }
+            }
+
+            InitializeScene();
+            gameState.Phase = GamePhase.WaitingForDrag;
+        }
+        finally
+        {
+            isStartingGame = false;
+        }
     }
 
     public async void SubmitGameLog()
@@ -141,11 +168,11 @@ public class GameController : MonoBehaviour
 
     SCVal BuildGameLogVal()
     {
-        ulong[] packed = gameState.PackedMoves.ToArray();
+        byte[] packed = gameState.PackedMoves.ToArray();
         uint finalScore = gameState.Score < 0 ? 0u : (uint)gameState.Score;
         return SMap(
             Entry(Sym("final_score"), U32(finalScore)),
-            Entry(Sym("packed_moves"), SMap(Entry(Sym("packed"), NativeVec(packed)))),
+            Entry(Sym("packed_moves"), SMap(Entry(Sym("packed"), SBytes(packed)))),
             Entry(Sym("seed"), U64(gameState.GameSeed)),
             Entry(Sym("submitted_ledger_seq"), U64(0)));
     }
@@ -153,9 +180,82 @@ public class GameController : MonoBehaviour
     static SCVal U32(uint value) => new SCVal.ScvU32 { u32 = new uint32(value) };
     static SCVal U64(ulong value) => new SCVal.ScvU64 { u64 = new uint64(value) };
     static SCVal Sym(string value) => new SCVal.ScvSymbol { sym = new SCSymbol(value) };
-    static SCVal NativeVec(ulong[] values) => SCUtility.NativeToSCVal(values);
+    static SCVal SBytes(byte[] values) => new SCVal.ScvBytes { bytes = new SCBytes(values ?? Array.Empty<byte>()) };
     static SCVal SMap(params SCMapEntry[] entries) => new SCVal.ScvMap { map = new SCMap(entries) };
     static SCMapEntry Entry(SCVal key, SCVal val) => new SCMapEntry { key = key, val = val };
+
+#pragma warning disable 0649
+    struct ShapeCatalogsEntry
+    {
+        public uint[] trominos;
+        public uint[] tetrominos;
+    }
+#pragma warning restore 0649
+
+    static bool TryGetLiveNetworkContext(out NetworkContext context)
+    {
+        context = default;
+        if (GameManager.Instance == null)
+        {
+            return false;
+        }
+
+        context = GameManager.Instance.CurrentNetworkContext;
+        return context.online && !string.IsNullOrWhiteSpace(context.contractAddress);
+    }
+
+    async Task<bool> TryLoadShapeCatalogsFromContract(NetworkContext context, uint seed)
+    {
+        SCVal[] args = { U64(seed) };
+        StellarClientTask task = GameManager.Instance != null ? GameManager.Instance.ClientTask : null;
+        Result<(Transaction, SimulateTransactionResult)> result =
+            await StellarClient.SimulateContractFunction(context, "start_game_check", args, true, task);
+        if (result.IsError || result.Value.Item2 == null || result.Value.Item2.Error != null)
+        {
+            Debug.LogError($"GameController: start_game_check failed: {result.Message}", this);
+            return false;
+        }
+
+        SCVal raw = result.Value.Item2.Results?.FirstOrDefault()?.Result;
+        if (raw == null)
+        {
+            Debug.LogError("GameController: start_game_check returned no result.", this);
+            return false;
+        }
+
+        ShapeCatalogsEntry catalogs;
+        try
+        {
+            catalogs = SCUtility.SCValToNative<ShapeCatalogsEntry>(raw);
+        }
+        catch (Exception exception)
+        {
+            Debug.LogError($"GameController: start_game_check decode failed: {exception.Message}", this);
+            return false;
+        }
+
+        if (catalogs.trominos == null || catalogs.trominos.Length == 0
+            || catalogs.tetrominos == null || catalogs.tetrominos.Length == 0)
+        {
+            Debug.LogError("GameController: start_game_check returned empty catalogs.", this);
+            return false;
+        }
+
+        gameState.TrominoPackedShapes = ToIntArray(catalogs.trominos);
+        gameState.TetrominoPackedShapes = ToIntArray(catalogs.tetrominos);
+        return true;
+    }
+
+    static int[] ToIntArray(uint[] values)
+    {
+        int[] converted = new int[values.Length];
+        for (int i = 0; i < values.Length; i++)
+        {
+            converted[i] = unchecked((int)values[i]);
+        }
+
+        return converted;
+    }
 
     public void ClearScene()
     {
@@ -206,8 +306,8 @@ public class GameController : MonoBehaviour
         for (int i = 0; i < batch.Length; i++)
         {
             int[] sourceShapes = i == trominoSlotIndex
-                ? BlockBlastConstants.TrominoPackedShapes
-                : BlockBlastConstants.TetrominoPackedShapes;
+                ? gameState.TrominoPackedShapes
+                : gameState.TetrominoPackedShapes;
             batch[i] = PickRandomPackedShape(sourceShapes);
         }
 
@@ -218,7 +318,9 @@ public class GameController : MonoBehaviour
     {
         if (packedShapes == null || packedShapes.Length == 0)
         {
-            packedShapes = BlockBlastConstants.TetrominoPackedShapes;
+            packedShapes = gameState != null && gameState.TetrominoPackedShapes != null
+                ? gameState.TetrominoPackedShapes
+                : BlockBlastConstants.TetrominoPackedShapes;
         }
 
         if (packedShapes == null || packedShapes.Length == 0)
@@ -333,11 +435,22 @@ public class GameController : MonoBehaviour
         BeginSlotReturn(shape, sourceSlot);
     }
 
-    public bool TryPlaceShape(ShapeDefinition shapeDefinition, Vector2Int anchorCoord, ShapeTray sourceShape = null)
+    public bool TryPlaceShape(ShapeDefinition shapeDefinition, Vector2Int anchorCoord, ShapeTray sourceShape = null, ShapeOfferSlot sourceSlot = null)
     {
         if (shapeDefinition == null || board == null)
         {
             return false;
+        }
+
+        int trayIndex = -1;
+        if (gameState != null)
+        {
+            trayIndex = offerArea != null ? offerArea.OfferSlotIndex(sourceSlot) : -1;
+            if (trayIndex < 0 || trayIndex > 2)
+            {
+                Debug.LogError("GameController: Cannot pack a move without an offer tray index.", this);
+                return false;
+            }
         }
 
         BoardState boardState = BuildBoardStateSnapshot();
@@ -386,10 +499,8 @@ public class GameController : MonoBehaviour
 
         if (gameState != null)
         {
-            gameState.PackedMoves.Add(GameMovePacking.Pack(
-                anchorCoord.x,
-                anchorCoord.y,
-                shapeDefinition.PackedShapeData));
+            Vector2Int dropCell = GameUtility.GetDropCellCoord(anchorCoord);
+            gameState.PackedMoves.Add(GameMovePacking.Pack(dropCell.x, dropCell.y, trayIndex));
         }
 
         return true;
@@ -567,7 +678,7 @@ public class GameController : MonoBehaviour
     void CommitBoardDrop(ShapeTray shape, ShapeOfferSlot sourceSlot, Vector2Int anchorCoord)
     {
         dropSettleTween = null;
-        bool placed = TryPlaceShape(shape.Definition, anchorCoord, shape);
+        bool placed = TryPlaceShape(shape.Definition, anchorCoord, shape, sourceSlot);
         Debug.Log($"GameController: CommitBoardDrop placed={placed}.", this);
         if (!placed)
         {

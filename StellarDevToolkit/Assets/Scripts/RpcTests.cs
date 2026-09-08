@@ -304,6 +304,24 @@ namespace StellarSDK
             Check("echo_max_u32", Eq<uint>(await Sim(context, "echo_max_u32", task), uint.MaxValue), c);
             Check("echo_min_i32", Eq<int>(await Sim(context, "echo_min_i32", task), int.MinValue), c);
             Check("echo_max_u64", Eq<ulong>(await Sim(context, "echo_max_u64", task), ulong.MaxValue), c);
+
+            SCVal catalogsVal = await Sim(context, "start_game_check", task, U64(1));
+            bool catalogsOk = false;
+            if (catalogsVal != null)
+            {
+                try
+                {
+                    ShapeCatalogsEntry catalogs = SCUtility.SCValToNative<ShapeCatalogsEntry>(catalogsVal);
+                    catalogsOk = catalogs.trominos != null && catalogs.trominos.Length == 6
+                        && catalogs.tetrominos != null && catalogs.tetrominos.Length == 19;
+                }
+                catch (Exception exception)
+                {
+                    Debug.LogError($"start_game_check decode failed: {exception.Message}");
+                }
+            }
+
+            Check("start_game_check catalogs", catalogsOk, c);
         }
 
         // Field names must match the contract's GameLog symbol keys so
@@ -311,7 +329,7 @@ namespace StellarSDK
 #pragma warning disable 0649 // assigned by reflection in SCValToNative
         struct PackedMovesEntry
         {
-            public ulong[] packed;
+            public byte[] packed;
         }
 
         struct GameLogEntry
@@ -320,6 +338,12 @@ namespace StellarSDK
             public PackedMovesEntry packed_moves;
             public ulong seed;
             public ulong submitted_ledger_seq;
+        }
+
+        struct ShapeCatalogsEntry
+        {
+            public uint[] trominos;
+            public uint[] tetrominos;
         }
 #pragma warning restore 0649
 
@@ -360,28 +384,9 @@ namespace StellarSDK
             Check("get_game_logs is empty for an unknown address", strangerLogs != null && strangerLogs.Length == 0, c);
         }
 
-        static readonly ulong[] CapturedUnityPackedMoves =
+        static readonly byte[] CapturedUnityPackedMoves =
         {
-            281466386919552UL,
-            279275953854464UL,
-            14336UL,
-            3289945084288UL,
-            2203318358208UL,
-            280388349991040UL,
-            5497558153472UL,
-            5488968347904UL,
-            3289944961152UL,
-            280392645095680UL,
-            1112396804224UL,
-            2207613202560UL,
-            1120990793856UL,
-            3311419865088UL,
-            4419521484800UL,
-            281466387173504UL,
-            3294240116864UL,
-            279297428428800UL,
-            5514738022400UL,
-            17180143744UL,
+            34, 9, 72, 128, 141, 54, 233, 192, 130, 56, 118, 145, 124, 181, 222, 33, 132, 30, 248, 90,
         };
 
         static async Task RunCapturedUnityGameLogTest(NetworkContext context, Counter c, StellarClientTask task, SCVal player)
@@ -492,14 +497,12 @@ namespace StellarSDK
 
         // GameLog, sorted alphabetically: final_score, packed_moves, seed, submitted_ledger_seq.
         // submitted_ledger_seq is whatever the contract stamps, so send 0.
-        static SCVal GameLogVal(uint finalScore, ulong seed, params ulong[] packedMoves)
+        static SCVal GameLogVal(uint finalScore, ulong seed, byte[] packedMoves)
         {
-            SCVal packedVec = packedMoves == null || packedMoves.Length == 0
-                ? Vec()
-                : Vec(Array.ConvertAll(packedMoves, U64));
+            SCVal packedBytes = SBytes(packedMoves ?? Array.Empty<byte>());
             return SMap(
                 Entry(Sym("final_score"), U32(finalScore)),
-                Entry(Sym("packed_moves"), SMap(Entry(Sym("packed"), packedVec))),
+                Entry(Sym("packed_moves"), SMap(Entry(Sym("packed"), packedBytes))),
                 Entry(Sym("seed"), U64(seed)),
                 Entry(Sym("submitted_ledger_seq"), U64(0))
             );

@@ -16,7 +16,9 @@ public class GameState
     public int CurrentStreak;
     public uint GameSeed;
     public IntegerRng Random;
-    public readonly List<ulong> PackedMoves;
+    public readonly List<byte> PackedMoves;
+    public int[] TrominoPackedShapes;
+    public int[] TetrominoPackedShapes;
 
     public GameState(uint seed)
     {
@@ -25,7 +27,9 @@ public class GameState
         CurrentStreak = 0;
         GameSeed = seed;
         Random = new IntegerRng(seed);
-        PackedMoves = new List<ulong>();
+        PackedMoves = new List<byte>();
+        TrominoPackedShapes = BlockBlastConstants.TrominoPackedShapes;
+        TetrominoPackedShapes = BlockBlastConstants.TetrominoPackedShapes;
     }
 
     public int NextIndex(int count)

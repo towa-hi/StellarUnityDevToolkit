@@ -1,7 +1,7 @@
 #![cfg(test)]
 
 use super::*;
-use soroban_sdk::{testutils::Address as _, token, vec, Address, Env, Map, String};
+use soroban_sdk::{testutils::Address as _, token, vec, Address, Bytes, Env, Map, String};
 
 // Minimal NFT contract used to exercise the marketplace cross-contract calls.
 // Matches the `Nft` client interface (`transfer`, `owner_of`) plus a `mint`.
@@ -242,7 +242,7 @@ fn setup_game_log<'a>() -> (Env, ContractClient<'a>, Address) {
 
 fn empty_packed_moves(env: &Env) -> PackedMoves {
     PackedMoves {
-        packed: Vec::new(env),
+        packed: Bytes::new(env),
     }
 }
 
@@ -255,55 +255,92 @@ fn unfinished_game_log(env: &Env, final_score: u32, seed: u64) -> GameLog {
     }
 }
 
-fn pack_move(x: i8, y: i8, shape: u32) -> u64 {
-    let mut packed = shape as u64;
-    packed |= (x as u8 as u64) << 32;
-    packed |= (y as u8 as u64) << 40;
-    packed
+fn pack_move(cell_x: i32, cell_y: i32, tray: u32) -> u8 {
+    crate::game::pack_move(cell_x, cell_y, tray)
 }
 
-fn packed_moves_from(env: &Env, packed: &[u64]) -> PackedMoves {
-    let mut values = Vec::new(env);
-    for value in packed {
-        values.push_back(*value);
+fn packed_moves_from(env: &Env, packed: &[u8]) -> PackedMoves {
+    PackedMoves {
+        packed: Bytes::from_slice(env, packed),
     }
-    PackedMoves { packed: values }
+}
+
+const LEGACY_CAPTURED_UNITY_PACKED_U64: [u64; 20] = [
+    281466386919552,
+    279275953854464,
+    14336,
+    3289945084288,
+    2203318358208,
+    280388349991040,
+    5497558153472,
+    5488968347904,
+    3289944961152,
+    280392645095680,
+    1112396804224,
+    2207613202560,
+    1120990793856,
+    3311419865088,
+    4419521484800,
+    281466387173504,
+    3294240116864,
+    279297428428800,
+    5514738022400,
+    17180143744,
+];
+
+#[test]
+fn test_start_game_check_returns_shape_catalogs() {
+    let (env, client, _) = setup_game_log();
+    let catalogs = client.start_game_check(&1);
+    assert_eq!(
+        catalogs.trominos,
+        vec![
+            &env, 14336u32, 135296, 143360, 12416, 6272, 137216,
+        ]
+    );
+    assert_eq!(
+        catalogs.tetrominos,
+        vec![
+            &env,
+            30720u32,
+            4329600,
+            405504,
+            145408,
+            143488,
+            14464,
+            137344,
+            208896,
+            274560,
+            399360,
+            143616,
+            79872,
+            397440,
+            14592,
+            135360,
+            276480,
+            135552,
+            14400,
+            200832,
+        ]
+    );
 }
 
 #[test]
 fn test_register_game_log_accepts_captured_unity_game() {
     let (env, client, player) = setup_game_log();
-    let log = GameLog {
-        final_score: 43,
-        packed_moves: packed_moves_from(
+    let log = crate::game::recapture_legacy_unity_log(&env, 2951901131, &LEGACY_CAPTURED_UNITY_PACKED_U64);
+
+    assert_eq!(log.final_score, 43);
+    assert_eq!(
+        log.packed_moves.packed,
+        Bytes::from_slice(
             &env,
             &[
-                281466386919552,
-                279275953854464,
-                14336,
-                3289945084288,
-                2203318358208,
-                280388349991040,
-                5497558153472,
-                5488968347904,
-                3289944961152,
-                280392645095680,
-                1112396804224,
-                2207613202560,
-                1120990793856,
-                3311419865088,
-                4419521484800,
-                281466387173504,
-                3294240116864,
-                279297428428800,
-                5514738022400,
-                17180143744,
+                34, 9, 72, 128, 141, 54, 233, 192, 130, 56, 118, 145, 124, 181, 222, 33, 132, 30,
+                248, 90,
             ],
-        ),
-        seed: 2951901131,
-        submitted_ledger_seq: 0,
-    };
-
+        )
+    );
     assert_eq!(crate::game::validate_game_log(&log), Ok(43));
     client.register_game_log(&player, &log);
 
@@ -397,41 +434,41 @@ fn test_game_logs_are_scoped_per_address() {
 }
 
 #[test]
-fn test_packed_moves_to_moves_unpacks_x_y_shape() {
+fn test_packed_moves_to_moves_unpacks_tray_and_cell() {
     let env = Env::default();
-    let packed_moves = PackedMoves {
-        packed: vec![
-            &env,
-            pack_move(-2, 5, 30720),
-            pack_move(0, 0, 405504),
-            pack_move(-1, -1, 14336),
+    let packed_moves = packed_moves_from(
+        &env,
+        &[
+            pack_move(0, 0, 0),
+            pack_move(7, 7, 2),
+            pack_move(3, 5, 1),
         ],
-    };
+    );
 
     let moves = packed_moves_to_moves(&env, packed_moves);
     assert_eq!(moves.len(), 3);
     assert_eq!(
         moves.get(0).unwrap(),
         Move {
-            x: -2,
-            y: 5,
-            shape: 30720,
+            x: 0,
+            y: 0,
+            tray: 0,
         }
     );
     assert_eq!(
         moves.get(1).unwrap(),
         Move {
-            x: 0,
-            y: 0,
-            shape: 405504,
+            x: 7,
+            y: 7,
+            tray: 2,
         }
     );
     assert_eq!(
         moves.get(2).unwrap(),
         Move {
-            x: -1,
-            y: -1,
-            shape: 14336,
+            x: 3,
+            y: 5,
+            tray: 1,
         }
     );
 }
@@ -469,16 +506,40 @@ fn test_validate_game_log_accepts_unfinished_game() {
 }
 
 #[test]
-fn test_validate_game_log_rejects_shape_not_in_offer() {
+fn test_validate_game_log_rejects_illegal_tray() {
     let env = Env::default();
     let mut log = crate::game::greedy_game_log(&env, 5);
     let first = log.packed_moves.packed.get(0).unwrap();
-    log.packed_moves.packed.set(0, first ^ 1);
+    log.packed_moves.packed.set(0, first | 0b11);
 
     assert_eq!(
         crate::game::validate_game_log(&log),
         Err(Error::InvalidGameLog)
     );
+}
+
+#[test]
+fn test_validate_game_log_rejects_double_used_tray_slot() {
+    let env = Env::default();
+    let mut log = crate::game::greedy_game_log(&env, 5);
+    assert!(log.packed_moves.packed.len() >= 2);
+    let first = log.packed_moves.packed.get(0).unwrap();
+    let second = log.packed_moves.packed.get(1).unwrap();
+    let first_tray = first & 0b11;
+    log.packed_moves
+        .packed
+        .set(1, (second & !0b11) | first_tray);
+
+    assert_eq!(
+        crate::game::validate_game_log(&log),
+        Err(Error::InvalidGameLog)
+    );
+}
+
+#[test]
+fn test_precompute_offer_batches_matches_seeded_length() {
+    assert_eq!(crate::game::precompute_offer_batches(1, 0), crate::game::precompute_offer_batches(1, 2));
+    assert_ne!(crate::game::precompute_offer_batches(1, 3), crate::game::precompute_offer_batches(1, 2));
 }
 
 #[test]
