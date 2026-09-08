@@ -4,6 +4,7 @@ use soroban_sdk::{Env, Vec};
 const BOARD_SIZE: i32 = 8;
 const SHAPE_GRID_SIZE: i32 = 5;
 const TRAY_SIZE: usize = 3;
+#[cfg(test)]
 const PIVOT_OFFSET: i32 = 2;
 const FOOTPRINT_BIT_COUNT: u32 = 25;
 const FOOTPRINT_MASK: u32 = (1 << FOOTPRINT_BIT_COUNT) - 1;
@@ -12,6 +13,19 @@ const STREAK_SOFTENER: i32 = 4;
 const MAX_STREAK_BONUS_PERCENT: i32 = 150;
 const RNG_FALLBACK_SEED: u32 = 0x9E3779B9;
 const MAX_REPLAY_MOVES: u32 = 10_000;
+
+// Board row 0 and board column 0 as cell bitmasks; shift by y * BOARD_SIZE or by
+// x to reach any other line.
+const ROW_MASK: u64 = (1u64 << BOARD_SIZE) - 1;
+const COL_MASK: u64 = {
+    let mut mask = 0u64;
+    let mut y = 0;
+    while y < BOARD_SIZE {
+        mask |= 1u64 << (y * BOARD_SIZE);
+        y += 1;
+    }
+    mask
+};
 
 const TROMINO_PACKED_SHAPES: [u32; 6] = [
     14336, 135296, 143360, 12416, 6272, 137216,
@@ -87,15 +101,14 @@ impl Sim {
             return Err(Error::InvalidGameLog);
         }
 
-        let mut placed = self.board;
+        let mut placed_tiles = 0u64;
         for_each_tile(mv.shape, |lx, ly| {
-            let tx = mv.x + lx;
-            let ty = mv.y + ly;
-            placed |= cell_mask(tx, ty);
+            placed_tiles |= cell_mask(mv.x + lx, mv.y + ly);
             true
         });
 
-        let (cleared_lines, clear_mask) = completed_lines(placed);
+        let placed = self.board | placed_tiles;
+        let (cleared_lines, clear_mask) = completed_lines(placed, placed_tiles);
         self.board = placed & !clear_mask;
         self.score = self
             .score
@@ -118,19 +131,7 @@ impl Sim {
         fill_empty(&mut self.rng, &mut self.preview);
     }
 
-    fn has_any_placement(&self) -> bool {
-        for shape in self.offer.iter().flatten() {
-            for y in 0..BOARD_SIZE {
-                for x in 0..BOARD_SIZE {
-                    if can_place(self.board, *shape, x - PIVOT_OFFSET, y - PIVOT_OFFSET) {
-                        return true;
-                    }
-                }
-            }
-        }
-        false
-    }
-
+    #[cfg(test)]
     fn first_valid_move(&self) -> Option<Move> {
         for shape in self.offer.iter().flatten() {
             for y in 0..BOARD_SIZE {
@@ -215,37 +216,24 @@ fn can_place(board: u64, shape: u32, anchor_x: i32, anchor_y: i32) -> bool {
     })
 }
 
-fn completed_lines(board: u64) -> (i32, u64) {
+// Only lines containing one of the tiles just placed can have completed: every
+// line that filled up on an earlier move was cleared by that move, so the rest
+// of the board never holds a full line and does not need to be scanned.
+fn completed_lines(board: u64, placed_tiles: u64) -> (i32, u64) {
     let mut count = 0;
     let mut clear_mask = 0u64;
     for y in 0..BOARD_SIZE {
-        let mut full = true;
-        for x in 0..BOARD_SIZE {
-            if board & cell_mask(x, y) == 0 {
-                full = false;
-                break;
-            }
-        }
-        if full {
+        let row = ROW_MASK << (y * BOARD_SIZE);
+        if placed_tiles & row != 0 && board & row == row {
             count += 1;
-            for x in 0..BOARD_SIZE {
-                clear_mask |= cell_mask(x, y);
-            }
+            clear_mask |= row;
         }
     }
     for x in 0..BOARD_SIZE {
-        let mut full = true;
-        for y in 0..BOARD_SIZE {
-            if board & cell_mask(x, y) == 0 {
-                full = false;
-                break;
-            }
-        }
-        if full {
+        let col = COL_MASK << x;
+        if placed_tiles & col != 0 && board & col == col {
             count += 1;
-            for y in 0..BOARD_SIZE {
-                clear_mask |= cell_mask(x, y);
-            }
+            clear_mask |= col;
         }
     }
     (count, clear_mask)
@@ -277,9 +265,8 @@ pub(crate) fn validate_game_log(game_log: &GameLog) -> Result<u32, Error> {
     for packed in game_log.packed_moves.packed.iter() {
         sim.apply_move(&unpack_move(packed))?;
     }
-    if sim.has_any_placement() {
-        return Err(Error::InvalidGameLog);
-    }
+    // A log that stops before the board is stuck is accepted: the score only ever
+    // accumulates, so a short replay can only score lower than the full game.
     Ok(sim.score)
 }
 

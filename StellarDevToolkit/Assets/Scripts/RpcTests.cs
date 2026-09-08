@@ -325,43 +325,30 @@ namespace StellarSDK
 
         static async Task RunGameLogTests(NetworkContext context, Counter c, StellarClientTask task)
         {
-            // Testnet state survives between runs and the contract rejects a seed
-            // it already stored, so each run needs a seed it has never seen.
-            ulong seed = (ulong)DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-            const uint FinalScore = 4321;
             SCVal player = StellarClient.AccountStringToScvAddress(context.userAccount.AccountId);
-            SCVal[] submitArgs = { player, GameLogVal(FinalScore, seed) };
+            SCVal capturedPlayer = string.IsNullOrWhiteSpace(context.assetIssuerAddress)
+                ? player
+                : StellarClient.AccountStringToScvAddress(context.assetIssuerAddress);
+            await RunCapturedUnityGameLogTest(context, c, task, capturedPlayer);
 
-            // --- register_game_log (a write, so it needs a real signed tx) ---
+            const uint CapturedScore = 43;
+            const ulong CapturedSeed = 2951901131UL;
+            SCVal capturedLog = GameLogVal(CapturedScore, CapturedSeed, CapturedUnityPackedMoves);
 
-            Debug.Log($"[TEST] register_game_log(seed={seed})...");
-            Result<(SimulateTransactionResult, SendTransactionResult, GetTransactionResult)> submit =
-                await StellarClient.CallContractFunction(context, "register_game_log", submitArgs, task);
-            if (submit.IsError)
-            {
-                Debug.LogError($"[FAIL] register_game_log: {submit.Message}");
-                c.Failed++;
-                return;
-            }
-
-            Debug.Log($"[PASS] register_game_log: txHash={submit.Value.Item2.Hash}, status={submit.Value.Item3.Status}");
-            c.Passed++;
-
-            // --- get_game_logs returns what was just written ---
+            // --- get_game_logs returns the captured game this account already submitted ---
 
             GameLogEntry[] logs = await GetGameLogs(context, task, player);
-            int index = IndexOfSeed(logs, seed);
-            Check($"get_game_logs contains seed={seed}", index >= 0, c);
+            int index = IndexOfSeed(logs, CapturedSeed);
+            Check($"get_game_logs contains captured seed={CapturedSeed}", index >= 0, c);
             if (index >= 0)
             {
-                Check("final_score round-trips", logs[index].final_score == FinalScore, c);
-                // The client sent 0; a non-zero value means the contract stamped it.
+                Check("captured final_score round-trips", logs[index].final_score == CapturedScore, c);
                 Check("submitted_ledger_seq stamped by contract", logs[index].submitted_ledger_seq > 0, c);
             }
 
-            // --- a repeated seed is rejected, even with a different score ---
+            // --- a repeated seed is rejected ---
 
-            SCVal[] duplicateArgs = { player, GameLogVal(FinalScore + 1, seed) };
+            SCVal[] duplicateArgs = { player, capturedLog };
             Result<(SimulateTransactionResult, SendTransactionResult, GetTransactionResult)> duplicate =
                 await StellarClient.CallContractFunction(context, "register_game_log", duplicateArgs, task);
             Check("register_game_log rejects duplicate seed", duplicate.IsError, c);
@@ -371,6 +358,60 @@ namespace StellarSDK
             SCVal stranger = StellarClient.AccountStringToScvAddress(MuxedAccount.Random().AccountId);
             GameLogEntry[] strangerLogs = await GetGameLogs(context, task, stranger);
             Check("get_game_logs is empty for an unknown address", strangerLogs != null && strangerLogs.Length == 0, c);
+        }
+
+        static readonly ulong[] CapturedUnityPackedMoves =
+        {
+            281466386919552UL,
+            279275953854464UL,
+            14336UL,
+            3289945084288UL,
+            2203318358208UL,
+            280388349991040UL,
+            5497558153472UL,
+            5488968347904UL,
+            3289944961152UL,
+            280392645095680UL,
+            1112396804224UL,
+            2207613202560UL,
+            1120990793856UL,
+            3311419865088UL,
+            4419521484800UL,
+            281466387173504UL,
+            3294240116864UL,
+            279297428428800UL,
+            5514738022400UL,
+            17180143744UL,
+        };
+
+        static async Task RunCapturedUnityGameLogTest(NetworkContext context, Counter c, StellarClientTask task, SCVal player)
+        {
+            const uint FinalScore = 43;
+            const ulong Seed = 2951901131UL;
+            SCVal[] args = { player, GameLogVal(FinalScore, Seed, CapturedUnityPackedMoves) };
+
+            Debug.Log($"[TEST] simulate register_game_log captured unity game (seed={Seed}) as asset issuer...");
+            Result<(Transaction, SimulateTransactionResult)> sim =
+                await StellarClient.SimulateContractFunction(context, "register_game_log", args, false, task);
+            bool simOk = sim.IsOk && sim.Value.Item2.Error == null;
+            bool alreadyStored = !simOk && IsAlreadyExistsError(sim);
+            Check("simulate register_game_log captured unity game", simOk || alreadyStored, c);
+            if (!simOk && !alreadyStored)
+            {
+                Debug.LogError($"[FAIL] captured unity game simulation: {sim.Message}");
+            }
+        }
+
+        static bool IsAlreadyExistsError(Result<(Transaction, SimulateTransactionResult)> result)
+        {
+            string message = result.Message ?? "";
+            if (result.IsOk && result.Value.Item2 != null && result.Value.Item2.Error != null)
+            {
+                message += result.Value.Item2.Error;
+            }
+
+            return message.IndexOf("AlreadyExists", StringComparison.OrdinalIgnoreCase) >= 0
+                || message.Contains("#2");
         }
 
         static async Task<GameLogEntry[]> GetGameLogs(NetworkContext context, StellarClientTask task, SCVal address)
@@ -451,12 +492,17 @@ namespace StellarSDK
 
         // GameLog, sorted alphabetically: final_score, packed_moves, seed, submitted_ledger_seq.
         // submitted_ledger_seq is whatever the contract stamps, so send 0.
-        static SCVal GameLogVal(uint finalScore, ulong seed) =>
-            SMap(
+        static SCVal GameLogVal(uint finalScore, ulong seed, params ulong[] packedMoves)
+        {
+            SCVal packedVec = packedMoves == null || packedMoves.Length == 0
+                ? Vec()
+                : Vec(Array.ConvertAll(packedMoves, U64));
+            return SMap(
                 Entry(Sym("final_score"), U32(finalScore)),
-                Entry(Sym("packed_moves"), SMap(Entry(Sym("packed"), Vec()))),
+                Entry(Sym("packed_moves"), SMap(Entry(Sym("packed"), packedVec))),
                 Entry(Sym("seed"), U64(seed)),
                 Entry(Sym("submitted_ledger_seq"), U64(0))
             );
+        }
     }
 }

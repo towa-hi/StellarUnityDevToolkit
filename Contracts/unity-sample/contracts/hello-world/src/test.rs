@@ -262,6 +262,58 @@ fn pack_move(x: i8, y: i8, shape: u32) -> u64 {
     packed
 }
 
+fn packed_moves_from(env: &Env, packed: &[u64]) -> PackedMoves {
+    let mut values = Vec::new(env);
+    for value in packed {
+        values.push_back(*value);
+    }
+    PackedMoves { packed: values }
+}
+
+#[test]
+fn test_register_game_log_accepts_captured_unity_game() {
+    let (env, client, player) = setup_game_log();
+    let log = GameLog {
+        final_score: 43,
+        packed_moves: packed_moves_from(
+            &env,
+            &[
+                281466386919552,
+                279275953854464,
+                14336,
+                3289945084288,
+                2203318358208,
+                280388349991040,
+                5497558153472,
+                5488968347904,
+                3289944961152,
+                280392645095680,
+                1112396804224,
+                2207613202560,
+                1120990793856,
+                3311419865088,
+                4419521484800,
+                281466387173504,
+                3294240116864,
+                279297428428800,
+                5514738022400,
+                17180143744,
+            ],
+        ),
+        seed: 2951901131,
+        submitted_ledger_seq: 0,
+    };
+
+    assert_eq!(crate::game::validate_game_log(&log), Ok(43));
+    client.register_game_log(&player, &log);
+
+    let stored = client.get_game_logs(&player).get(0).unwrap();
+    assert_eq!(stored.final_score, 43);
+    assert_eq!(stored.seed, 2951901131);
+    assert_eq!(stored.packed_moves.packed.len(), 20);
+    assert_eq!(stored.submitted_ledger_seq, env.ledger().sequence() as u64);
+}
+
 #[test]
 fn test_register_game_log_persists_and_stamps_ledger_seq() {
     let (env, client, player) = setup_game_log();
@@ -393,13 +445,27 @@ fn test_validate_game_log_replays_greedy_score() {
 }
 
 #[test]
-fn test_validate_game_log_rejects_unfinished_game() {
+fn test_validate_game_log_accepts_unfinished_game() {
     let env = Env::default();
-    let log = unfinished_game_log(&env, 0, 1);
-    assert_eq!(
-        crate::game::validate_game_log(&log),
-        Err(Error::InvalidGameLog)
-    );
+    let empty = unfinished_game_log(&env, 0, 1);
+    assert_eq!(crate::game::validate_game_log(&empty), Ok(0));
+
+    // Stopping early is allowed because it cannot pay: a prefix of a game always
+    // scores at most what the full game scored.
+    let full = crate::game::greedy_game_log(&env, 99);
+    let half = full.packed_moves.packed.len() / 2;
+    assert!(half > 0);
+    let truncated = GameLog {
+        final_score: 0,
+        packed_moves: PackedMoves {
+            packed: full.packed_moves.packed.slice(..half),
+        },
+        seed: full.seed,
+        submitted_ledger_seq: u64::MAX,
+    };
+
+    let partial_score = crate::game::validate_game_log(&truncated).unwrap();
+    assert!(partial_score <= full.final_score);
 }
 
 #[test]
