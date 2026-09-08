@@ -229,6 +229,91 @@ fn test_market_list_rejects_unlisted_payment_token() {
     assert_eq!(result, Err(Ok(Error::PaymentTokenNotAllowed)));
 }
 
+// --- Game logs ---
+
+fn setup_game_log<'a>() -> (Env, ContractClient<'a>, Address) {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register(Contract, ());
+    let client = ContractClient::new(&env, &contract_id);
+    let player = Address::generate(&env);
+    (env, client, player)
+}
+
+fn game_log(final_score: u32, seed: u64) -> GameLog {
+    GameLog {
+        final_score,
+        seed,
+        // Overwritten by the contract; a bogus value proves it is ignored.
+        submitted_ledger_seq: u64::MAX,
+    }
+}
+
+#[test]
+fn test_register_game_log_persists_and_stamps_ledger_seq() {
+    let (env, client, player) = setup_game_log();
+
+    client.register_game_log(&player, &game_log(1234, 42));
+
+    let logs = client.get_game_logs(&player);
+    assert_eq!(logs.len(), 1);
+    let log = logs.get(0).unwrap();
+    assert_eq!(log.final_score, 1234);
+    assert_eq!(log.seed, 42);
+    assert_eq!(log.submitted_ledger_seq, env.ledger().sequence() as u64);
+}
+
+#[test]
+fn test_register_game_log_appends_distinct_seeds_in_order() {
+    let (_env, client, player) = setup_game_log();
+
+    client.register_game_log(&player, &game_log(10, 1));
+    client.register_game_log(&player, &game_log(20, 2));
+
+    let logs = client.get_game_logs(&player);
+    assert_eq!(logs.len(), 2);
+    assert_eq!(logs.get(0).unwrap().seed, 1);
+    assert_eq!(logs.get(1).unwrap().seed, 2);
+}
+
+#[test]
+fn test_register_game_log_rejects_duplicate_seed() {
+    let (_env, client, player) = setup_game_log();
+
+    client.register_game_log(&player, &game_log(10, 7));
+
+    // A different score does not make it a different submission.
+    let result = client.try_register_game_log(&player, &game_log(99, 7));
+    assert_eq!(result, Err(Ok(Error::AlreadyExists)));
+    assert_eq!(client.get_game_logs(&player).len(), 1);
+}
+
+#[test]
+fn test_register_game_log_auto_registers_player() {
+    let (env, client, player) = setup_game_log();
+
+    client.register_game_log(&player, &game_log(10, 1));
+
+    // The player record now exists, so registering again is rejected.
+    let result = client.try_register_player(&player, &String::from_str(&env, "Alice"));
+    assert_eq!(result, Err(Ok(Error::AlreadyExists)));
+}
+
+#[test]
+fn test_game_logs_are_scoped_per_address() {
+    let (env, client, player_a) = setup_game_log();
+    let player_b = Address::generate(&env);
+
+    client.register_game_log(&player_a, &game_log(10, 1));
+
+    assert_eq!(client.get_game_logs(&player_a).len(), 1);
+    assert_eq!(client.get_game_logs(&player_b).len(), 0);
+
+    // The same seed under a different address is not a duplicate.
+    client.register_game_log(&player_b, &game_log(20, 1));
+    assert_eq!(client.get_game_logs(&player_b).len(), 1);
+}
+
 #[test]
 fn test_hello() {
     let env = Env::default();
@@ -416,70 +501,11 @@ fn test_make_map() {
 }
 
 #[test]
-fn test_echo_player() {
-    let env = Env::default();
-    let contract_id = env.register(Contract, ());
-    let client = ContractClient::new(&env, &contract_id);
-
-    let p = Player {
-        name: String::from_str(&env, "Alice"),
-        score: 100,
-        active: true,
-    };
-    assert_eq!(client.echo_player(&p), p);
-}
-
-#[test]
-fn test_make_player() {
-    let env = Env::default();
-    let contract_id = env.register(Contract, ());
-    let client = ContractClient::new(&env, &contract_id);
-
-    let result = client.make_player(&String::from_str(&env, "Bob"), &50);
-    assert_eq!(result.name, String::from_str(&env, "Bob"));
-    assert_eq!(result.score, 50);
-    assert_eq!(result.active, true);
-}
-
-#[test]
-fn test_player_name() {
-    let env = Env::default();
-    let contract_id = env.register(Contract, ());
-    let client = ContractClient::new(&env, &contract_id);
-
-    let p = Player {
-        name: String::from_str(&env, "Charlie"),
-        score: 0,
-        active: false,
-    };
-    assert_eq!(client.player_name(&p), String::from_str(&env, "Charlie"));
-}
-
-#[test]
-fn test_player_score() {
-    let env = Env::default();
-    let contract_id = env.register(Contract, ());
-    let client = ContractClient::new(&env, &contract_id);
-
-    let p = Player {
-        name: String::from_str(&env, "Dave"),
-        score: 9999,
-        active: true,
-    };
-    assert_eq!(client.player_score(&p), 9999);
-}
-
-#[test]
 fn test_echo_inventory() {
     let env = Env::default();
     let contract_id = env.register(Contract, ());
     let client = ContractClient::new(&env, &contract_id);
 
-    let owner = Player {
-        name: String::from_str(&env, "Eve"),
-        score: 42,
-        active: true,
-    };
     let items = vec![
         &env,
         String::from_str(&env, "sword"),
@@ -489,11 +515,7 @@ fn test_echo_inventory() {
     quantities.set(String::from_str(&env, "sword"), 1u32);
     quantities.set(String::from_str(&env, "shield"), 2u32);
 
-    let inv = Inventory {
-        owner,
-        items,
-        quantities,
-    };
+    let inv = Inventory { items, quantities };
     assert_eq!(client.echo_inventory(&inv), inv);
 }
 
@@ -508,9 +530,7 @@ fn test_make_inventory() {
         String::from_str(&env, "potion"),
         String::from_str(&env, "scroll"),
     ];
-    let result = client.make_inventory(&String::from_str(&env, "Frank"), &items);
-    assert_eq!(result.owner.name, String::from_str(&env, "Frank"));
-    assert_eq!(result.owner.score, 0);
+    let result = client.make_inventory(&items);
     assert_eq!(result.items.len(), 2);
     assert_eq!(
         result.quantities.get(String::from_str(&env, "potion")),
@@ -545,31 +565,6 @@ fn test_concat_bytes() {
     let b = Bytes::from_slice(&env, &[3, 4]);
     let result = client.concat_bytes(&a, &b);
     assert_eq!(result, Bytes::from_slice(&env, &[1, 2, 3, 4]));
-}
-
-#[test]
-fn test_describe_player() {
-    let env = Env::default();
-    let contract_id = env.register(Contract, ());
-    let client = ContractClient::new(&env, &contract_id);
-
-    let p = Player {
-        name: String::from_str(&env, "Grace"),
-        score: 77,
-        active: true,
-    };
-    let desc = client.describe_player(&p);
-    assert_eq!(desc.len(), 2);
-    assert_eq!(desc.get(0), Some(String::from_str(&env, "Grace")));
-    assert_eq!(desc.get(1), Some(String::from_str(&env, "active")));
-
-    let inactive = Player {
-        name: String::from_str(&env, "Hank"),
-        score: 0,
-        active: false,
-    };
-    let desc2 = client.describe_player(&inactive);
-    assert_eq!(desc2.get(1), Some(String::from_str(&env, "inactive")));
 }
 
 #[test]

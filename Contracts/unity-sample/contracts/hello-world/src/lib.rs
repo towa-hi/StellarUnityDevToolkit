@@ -13,20 +13,26 @@ pub enum Error {
     NotSeller = 7,
     PaymentTokenNotAllowed = 8,
     CollectionNotAllowed = 9,
+    InvalidGameLog = 10,
 }
 
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Player {
     pub name: String,
-    pub score: u32,
-    pub active: bool,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct GameLog {
+    pub final_score: u32,
+    pub seed: u64,
+    pub submitted_ledger_seq: u64,
 }
 
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Inventory {
-    pub owner: Player,
     pub items: Vec<String>,
     pub quantities: Map<String, u32>,
 }
@@ -41,6 +47,7 @@ pub enum DataKey {
     NextListingId,
     Listing(u32),
     ActiveListings,
+    GameLog(Address), // list of logs for a player
 }
 
 #[contracttype]
@@ -85,8 +92,6 @@ impl Contract {
     pub fn register_player(e: &Env, address: Address, name: String) -> Result<Player, Error> {
         let player = Player {
             name,
-            score: 0,
-            active: true,
         };
         let player_key = DataKey::Player(address);
         let persistent = e.storage().persistent();
@@ -95,6 +100,49 @@ impl Contract {
         }
         persistent.set(&player_key, &player);
         Ok(player)
+    }
+
+    pub fn register_game_log(e: &Env, address: Address, game_log: GameLog) -> Result<(), Error> {
+        address.require_auth();
+
+        let persistent = e.storage().persistent();
+        let game_log_key = DataKey::GameLog(address.clone());
+        let mut game_logs: Vec<GameLog> = persistent
+            .get(&game_log_key)
+            .unwrap_or_else(|| Vec::new(e));
+
+        // One log per seed: a replayed seed is a duplicate submission.
+        for log in game_logs.iter() {
+            if log.seed == game_log.seed {
+                return Err(Error::AlreadyExists);
+            }
+        }
+
+        // final_score is client-supplied and untrusted until the replay
+        // verifier can recompute it from the log.
+        game_logs.push_back(GameLog {
+            submitted_ledger_seq: e.ledger().sequence() as u64,
+            ..game_log
+        });
+        persistent.set(&game_log_key, &game_logs);
+
+        // Auto-register so a log always has a player record behind it.
+        let player_key = DataKey::Player(address);
+        if !persistent.has(&player_key) {
+            let player = Player {
+                name: String::from_str(e, "unnamed player"),
+            };
+            persistent.set(&player_key, &player);
+        }
+
+        Ok(())
+    }
+
+    pub fn get_game_logs(e: &Env, address: Address) -> Vec<GameLog> {
+        e.storage()
+            .persistent()
+            .get(&DataKey::GameLog(address))
+            .unwrap_or_else(|| Vec::new(e))
     }
 
     // --- Marketplace ---
@@ -355,44 +403,16 @@ impl Contract {
 
     // --- Struct (serializes as SCMap with symbol keys) ---
 
-    pub fn echo_player(_e: &Env, p: Player) -> Player {
-        p
-    }
-
-    pub fn make_player(_e: &Env, name: String, score: u32) -> Player {
-        Player {
-            name,
-            score,
-            active: true,
-        }
-    }
-
-    pub fn player_name(_e: &Env, p: Player) -> String {
-        p.name
-    }
-
-    pub fn player_score(_e: &Env, p: Player) -> u32 {
-        p.score
-    }
-
-    // --- Nested struct ---
-
     pub fn echo_inventory(_e: &Env, inv: Inventory) -> Inventory {
         inv
     }
 
-    pub fn make_inventory(e: &Env, owner_name: String, items: Vec<String>) -> Inventory {
+    pub fn make_inventory(e: &Env, items: Vec<String>) -> Inventory {
         let mut quantities = Map::new(e);
         for i in 0..items.len() {
             quantities.set(items.get(i).unwrap(), (i + 1) as u32);
         }
-        let owner = Player {
-            name: owner_name,
-            score: 0,
-            active: true,
-        };
         Inventory {
-            owner,
             items,
             quantities,
         }
@@ -409,17 +429,6 @@ impl Contract {
         result.append(&a);
         result.append(&b);
         result
-    }
-
-    // --- Multi-return via Vec<String> (for easy C# deserialization) ---
-
-    pub fn describe_player(e: &Env, p: Player) -> Vec<String> {
-        let status = if p.active {
-            String::from_str(e, "active")
-        } else {
-            String::from_str(e, "inactive")
-        };
-        vec![e, p.name, status]
     }
 
     // --- Edge cases ---
