@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using TMPro;
 using UnityEngine;
@@ -43,18 +44,27 @@ public class MarketWindow : MonoBehaviour
         string assetAddress = manager.GetDefaultSep50AssetContractAddress();
         SetAssetAddress(assetAddress);
 
-        Result<(Dictionary<int, string> ownerMap, string contractAddress)> result =
-            await manager.FetchSEP50AssetOwnerMapAsync(assetAddress);
-        if (result.IsError)
+        // async void: an escaping exception would leave the window stuck on "Loading...".
+        try
         {
-            SetStatus($"Error: {result.Message}");
-            return;
-        }
+            Result<(Dictionary<int, string> ownerMap, string contractAddress)> result =
+                await manager.FetchSEP50AssetOwnerMapAsync(assetAddress);
+            if (result.IsError)
+            {
+                SetStatus($"Error: {result.Message}");
+                return;
+            }
 
-        (Dictionary<int, string> ownerMap, string contractAddress) = result.Value;
-        SetAssetAddress(contractAddress);
-        PopulateOwnedAssets(ownerMap, manager.GetContextAssetOwnerId());
-        SetStatus(assetCards.Count == 0 ? "No owned assets." : string.Empty);
+            (Dictionary<int, string> ownerMap, string contractAddress) = result.Value;
+            SetAssetAddress(contractAddress);
+            PopulateOwnedAssets(ownerMap, manager.GetContextAssetOwnerId());
+            SetStatus(assetCards.Count == 0 ? "No owned assets." : string.Empty);
+        }
+        catch (Exception exception)
+        {
+            Debug.LogError($"MarketWindow.Refresh failed: {exception.Message}");
+            SetStatus($"Error: {exception.Message}");
+        }
     }
 
     void PopulateOwnedAssets(Dictionary<int, string> assetMap, string ownerId)
@@ -77,7 +87,9 @@ public class MarketWindow : MonoBehaviour
             assetCard.SetName("Token ID: " + asset.Key);
             if (assetCard.sendButton != null)
             {
-                assetCard.sendButton.gameObject.SetActive(false);
+                // The card's name label lives on the send button, so disable the Button
+                // rather than the object: the token id stays readable and nothing is clickable.
+                assetCard.sendButton.enabled = false;
             }
 
             assetCards.Add(assetCard);
