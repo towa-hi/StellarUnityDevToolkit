@@ -30,8 +30,22 @@ public class GameManager : MonoBehaviour
     public TestWindow testWindow;
     public AssetModal assetModal;
     public SendModal sendModal;
+    public ConnectionWindow connectionWindow;
+    public MainWindow mainWindow;
+    public MarketWindow marketWindow;
+    public GameWindow gameWindow;
 
     public TransactionTracker transactionTracker;
+
+    bool hasConnectedContext;
+
+    public enum TopLevelWindow
+    {
+        Connection,
+        Main,
+        Market,
+        Game
+    }
     void Awake()
     {
         if (Instance == null)
@@ -77,17 +91,10 @@ public class GameManager : MonoBehaviour
         clientTask.OnBusyChanged -= HandleClientBusyChanged;
     }
 
-    async void Start()
+    void Start()
     {
-        try
-        {
-            StellarClient.EnableLogging = true;
-            await InitializeDefaultNetworkContextAsync();
-        }
-        catch (Exception exception)
-        {
-            Debug.LogError($"GameManager.Start failed: {exception.Message}");
-        }
+        StellarClient.EnableLogging = true;
+        ShowWindow(TopLevelWindow.Connection);
     }
 
     void HandleClientStepStarted(string step)
@@ -127,26 +134,48 @@ public class GameManager : MonoBehaviour
             info.SendResult.Hash);
     }
 
-    async Task InitializeDefaultNetworkContextAsync()
+    public void ShowWindow(TopLevelWindow window)
     {
-        if (defaultSettings == null)
-        {
-            Debug.LogError("GameManager: defaultSettings is missing.");
-            return;
-        }
+        SetWindowActive(connectionWindow, window == TopLevelWindow.Connection);
+        SetWindowActive(mainWindow, window == TopLevelWindow.Main);
+        SetWindowActive(marketWindow, window == TopLevelWindow.Market);
+        SetWindowActive(gameWindow, window == TopLevelWindow.Game);
 
-        await Task.Yield();
-        Network.UseTestNetwork();
-        MuxedAccount account = MuxedAccount.FromSecretSeed(defaultSettings.accountSecretSeed);
-        context = new NetworkContext(
-            true, NetworkContext.SigningMethod.PrivateKey, account, true,
-            defaultSettings.testnetUri,
-            defaultSettings.contractAddress,
-            defaultSettings.testnetAssetIssuerAddress,
-            defaultSettings.testnetAssetCode,
-            1000,
-            30);
-        SetNetworkContext(context);
+        switch (window)
+        {
+            case TopLevelWindow.Connection:
+                if (connectionWindow != null)
+                {
+                    connectionWindow.Init(hasConnectedContext ? context : (NetworkContext?)null);
+                }
+                break;
+            case TopLevelWindow.Market:
+                marketWindow?.Refresh();
+                break;
+        }
+    }
+
+    public void ShowMainWindow()
+    {
+        ShowWindow(TopLevelWindow.Main);
+    }
+
+    public void ShowConnectionWindow()
+    {
+        ShowWindow(TopLevelWindow.Connection);
+    }
+
+    public void ShowMarketWindow()
+    {
+        ShowWindow(TopLevelWindow.Market);
+    }
+
+    static void SetWindowActive(MonoBehaviour window, bool active)
+    {
+        if (window != null)
+        {
+            window.gameObject.SetActive(active);
+        }
     }
 
     public void RunTests()
@@ -229,6 +258,16 @@ public class GameManager : MonoBehaviour
     public void SetNetworkContext(NetworkContext networkContext)
     {
         context = networkContext;
+        hasConnectedContext = true;
+        if (context.isTestnet)
+        {
+            Network.UseTestNetwork();
+        }
+        else
+        {
+            Network.UsePublicNetwork();
+        }
+
         if (networkContextWindow != null)
         {
             networkContextWindow.PopulateNetworkContext(context);
@@ -236,7 +275,7 @@ public class GameManager : MonoBehaviour
         testWindow?.PopulateDefaultFields(refreshOwnerFromContext: true);
     }
 
-    static async Task<Result<string>> SignWithUnityWallet(string unsignedEnvelope, string networkPassphrase)
+    public static async Task<Result<string>> SignWithUnityWallet(string unsignedEnvelope, string networkPassphrase)
     {
         WalletResult<string> result = await WalletManager.SignTransaction(unsignedEnvelope, networkPassphrase);
         if (result.IsOk)
@@ -263,11 +302,11 @@ public class GameManager : MonoBehaviour
 
     public void StartGame()
     {
-        networkUI.gameObject.SetActive(false);
         if (transactionTracker != null)
         {
             transactionTracker.gameObject.SetActive(false);
         }
+        ShowWindow(TopLevelWindow.Game);
         NewGame();
     }
 
@@ -278,15 +317,12 @@ public class GameManager : MonoBehaviour
             gameController.ClearScene();
         }
 
-        if (networkUI != null)
-        {
-            networkUI.gameObject.SetActive(true);
-        }
-
         if (transactionTracker != null)
         {
             transactionTracker.gameObject.SetActive(true);
         }
+
+        ShowWindow(TopLevelWindow.Main);
     }
 
     public void TryGetSEP50AssetBalance(string assetContractAddress, string ownerAddress = null)
@@ -393,7 +429,7 @@ public class GameManager : MonoBehaviour
         return Result<Dictionary<int, string>>.Ok(ownerMap);
     }
 
-    async Task<Result<(Dictionary<int, string> ownerMap, string contractAddress)>> FetchSEP50AssetOwnerMapAsync(string assetContractAddress)
+    public async Task<Result<(Dictionary<int, string> ownerMap, string contractAddress)>> FetchSEP50AssetOwnerMapAsync(string assetContractAddress)
     {
         string normalizedAssetContractAddress = string.IsNullOrWhiteSpace(assetContractAddress)
             ? GetDefaultSep50AssetContractAddress()
