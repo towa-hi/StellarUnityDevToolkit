@@ -29,6 +29,23 @@
                     },
                     {
                       "key": {
+                        "symbol": "packed_moves"
+                      },
+                      "val": {
+                        "map": [
+                          {
+                            "key": {
+                              "symbol": "packed"
+                            },
+                            "val": {
+                              "vec": []
+                            }
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "key": {
                         "symbol": "seed"
                       },
                       "val": {
@@ -72,6 +89,23 @@
                       },
                       "val": {
                         "u32": 20
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "packed_moves"
+                      },
+                      "val": {
+                        "map": [
+                          {
+                            "key": {
+                              "symbol": "packed"
+                            },
+                            "val": {
+                              "vec": []
+                            }
+                          }
+                        ]
                       }
                     },
                     {
@@ -160,6 +194,23 @@
                         },
                         {
                           "key": {
+                            "symbol": "packed_moves"
+                          },
+                          "val": {
+                            "map": [
+                              {
+                                "key": {
+                                  "symbol": "packed"
+                                },
+                                "val": {
+                                  "vec": []
+                                }
+                              }
+                            ]
+                          }
+                        },
+                        {
+                          "key": {
                             "symbol": "seed"
                           },
                           "val": {
@@ -184,6 +235,23 @@
                           },
                           "val": {
                             "u32": 20
+                          }
+                        },
+                        {
+                          "key": {
+                            "symbol": "packed_moves"
+                          },
+                          "val": {
+                            "map": [
+                              {
+                                "key": {
+                                  "symbol": "packed"
+                                },
+                                "val": {
+                                  "vec": []
+                                }
+                              }
+                            ]
                           }
                         },
                         {

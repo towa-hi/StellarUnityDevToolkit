@@ -1,3 +1,5 @@
+using System.Collections.Generic;
+
 public enum GamePhase
 {
     NotStarted,
@@ -14,6 +16,7 @@ public class GameState
     public int CurrentStreak;
     public uint GameSeed;
     public IntegerRng Random;
+    public readonly List<ulong> PackedMoves;
 
     public GameState(uint seed)
     {
@@ -22,6 +25,7 @@ public class GameState
         CurrentStreak = 0;
         GameSeed = seed;
         Random = new IntegerRng(seed);
+        PackedMoves = new List<ulong>();
     }
 
     public int NextIndex(int count)

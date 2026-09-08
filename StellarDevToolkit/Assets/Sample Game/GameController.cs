@@ -309,6 +309,14 @@ public class GameController : MonoBehaviour
             ? CurrentStreak + 1
             : 0);
 
+        if (gameState != null)
+        {
+            gameState.PackedMoves.Add(GameMovePacking.Pack(
+                anchorCoord.x,
+                anchorCoord.y,
+                shapeDefinition.PackedShapeData));
+        }
+
         return true;
     }
 

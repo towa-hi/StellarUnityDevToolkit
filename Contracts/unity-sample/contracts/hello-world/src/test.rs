@@ -240,20 +240,34 @@ fn setup_game_log<'a>() -> (Env, ContractClient<'a>, Address) {
     (env, client, player)
 }
 
-fn game_log(final_score: u32, seed: u64) -> GameLog {
+fn empty_packed_moves(env: &Env) -> PackedMoves {
+    PackedMoves {
+        packed: Vec::new(env),
+    }
+}
+
+fn game_log(env: &Env, final_score: u32, seed: u64) -> GameLog {
     GameLog {
         final_score,
+        packed_moves: empty_packed_moves(env),
         seed,
         // Overwritten by the contract; a bogus value proves it is ignored.
         submitted_ledger_seq: u64::MAX,
     }
 }
 
+fn pack_move(x: i8, y: i8, shape: u32) -> u64 {
+    let mut packed = shape as u64;
+    packed |= (x as u8 as u64) << 32;
+    packed |= (y as u8 as u64) << 40;
+    packed
+}
+
 #[test]
 fn test_register_game_log_persists_and_stamps_ledger_seq() {
     let (env, client, player) = setup_game_log();
 
-    client.register_game_log(&player, &game_log(1234, 42));
+    client.register_game_log(&player, &game_log(&env, 1234, 42));
 
     let logs = client.get_game_logs(&player);
     assert_eq!(logs.len(), 1);
@@ -261,14 +275,15 @@ fn test_register_game_log_persists_and_stamps_ledger_seq() {
     assert_eq!(log.final_score, 1234);
     assert_eq!(log.seed, 42);
     assert_eq!(log.submitted_ledger_seq, env.ledger().sequence() as u64);
+    assert_eq!(log.packed_moves.packed.len(), 0);
 }
 
 #[test]
 fn test_register_game_log_appends_distinct_seeds_in_order() {
-    let (_env, client, player) = setup_game_log();
+    let (env, client, player) = setup_game_log();
 
-    client.register_game_log(&player, &game_log(10, 1));
-    client.register_game_log(&player, &game_log(20, 2));
+    client.register_game_log(&player, &game_log(&env, 10, 1));
+    client.register_game_log(&player, &game_log(&env, 20, 2));
 
     let logs = client.get_game_logs(&player);
     assert_eq!(logs.len(), 2);
@@ -278,12 +293,12 @@ fn test_register_game_log_appends_distinct_seeds_in_order() {
 
 #[test]
 fn test_register_game_log_rejects_duplicate_seed() {
-    let (_env, client, player) = setup_game_log();
+    let (env, client, player) = setup_game_log();
 
-    client.register_game_log(&player, &game_log(10, 7));
+    client.register_game_log(&player, &game_log(&env, 10, 7));
 
     // A different score does not make it a different submission.
-    let result = client.try_register_game_log(&player, &game_log(99, 7));
+    let result = client.try_register_game_log(&player, &game_log(&env, 99, 7));
     assert_eq!(result, Err(Ok(Error::AlreadyExists)));
     assert_eq!(client.get_game_logs(&player).len(), 1);
 }
@@ -292,7 +307,7 @@ fn test_register_game_log_rejects_duplicate_seed() {
 fn test_register_game_log_auto_registers_player() {
     let (env, client, player) = setup_game_log();
 
-    client.register_game_log(&player, &game_log(10, 1));
+    client.register_game_log(&player, &game_log(&env, 10, 1));
 
     // The player record now exists, so registering again is rejected.
     let result = client.try_register_player(&player, &String::from_str(&env, "Alice"));
@@ -304,14 +319,76 @@ fn test_game_logs_are_scoped_per_address() {
     let (env, client, player_a) = setup_game_log();
     let player_b = Address::generate(&env);
 
-    client.register_game_log(&player_a, &game_log(10, 1));
+    client.register_game_log(&player_a, &game_log(&env, 10, 1));
 
     assert_eq!(client.get_game_logs(&player_a).len(), 1);
     assert_eq!(client.get_game_logs(&player_b).len(), 0);
 
     // The same seed under a different address is not a duplicate.
-    client.register_game_log(&player_b, &game_log(20, 1));
+    client.register_game_log(&player_b, &game_log(&env, 20, 1));
     assert_eq!(client.get_game_logs(&player_b).len(), 1);
+}
+
+#[test]
+fn test_packed_moves_to_moves_unpacks_x_y_shape() {
+    let env = Env::default();
+    let packed_moves = PackedMoves {
+        packed: vec![
+            &env,
+            pack_move(-2, 5, 30720),
+            pack_move(0, 0, 405504),
+            pack_move(-1, -1, 14336),
+        ],
+    };
+
+    let moves = packed_moves_to_moves(&env, packed_moves);
+    assert_eq!(moves.len(), 3);
+    assert_eq!(
+        moves.get(0).unwrap(),
+        Move {
+            x: -2,
+            y: 5,
+            shape: 30720,
+        }
+    );
+    assert_eq!(
+        moves.get(1).unwrap(),
+        Move {
+            x: 0,
+            y: 0,
+            shape: 405504,
+        }
+    );
+    assert_eq!(
+        moves.get(2).unwrap(),
+        Move {
+            x: -1,
+            y: -1,
+            shape: 14336,
+        }
+    );
+}
+
+#[test]
+fn test_register_game_log_persists_packed_moves() {
+    let (env, client, player) = setup_game_log();
+    let packed_moves = PackedMoves {
+        packed: vec![&env, pack_move(-2, 5, 30720), pack_move(1, 3, 405504)],
+    };
+    let mut log = game_log(&env, 1234, 42);
+    log.packed_moves = packed_moves.clone();
+
+    client.register_game_log(&player, &log);
+
+    let stored = client.get_game_logs(&player).get(0).unwrap();
+    assert_eq!(stored.packed_moves, packed_moves);
+    let moves = packed_moves_to_moves(&env, stored.packed_moves);
+    assert_eq!(moves.get(0).unwrap().x, -2);
+    assert_eq!(moves.get(0).unwrap().y, 5);
+    assert_eq!(moves.get(0).unwrap().shape, 30720);
+    assert_eq!(moves.get(1).unwrap().x, 1);
+    assert_eq!(moves.get(1).unwrap().y, 3);
+    assert_eq!(moves.get(1).unwrap().shape, 405504);
 }
 
 #[test]

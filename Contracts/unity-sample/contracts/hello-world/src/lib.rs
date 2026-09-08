@@ -26,8 +26,45 @@ pub struct Player {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct GameLog {
     pub final_score: u32,
+    pub packed_moves: PackedMoves,
     pub seed: u64,
     pub submitted_ledger_seq: u64,
+}
+
+// Packed move list matching C# GameState.PackedMoves (List<ulong>).
+// Each u64:
+//   bits 0-31:  shape type = ShapeDefinition.PackedShapeData (u32)
+//   bits 32-39: drop x as i8 (two's complement)
+//   bits 40-47: drop y as i8 (two's complement)
+//   bits 48-63: reserved 0
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PackedMoves {
+    pub packed: Vec<u64>,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Move {
+    pub x: i32,
+    pub y: i32,
+    pub shape: u32,
+}
+
+pub fn unpack_move(packed: u64) -> Move {
+    Move {
+        shape: packed as u32,
+        x: ((packed >> 32) as u8) as i8 as i32,
+        y: ((packed >> 40) as u8) as i8 as i32,
+    }
+}
+
+pub fn packed_moves_to_moves(e: &Env, packed_moves: PackedMoves) -> Vec<Move> {
+    let mut moves = Vec::new(e);
+    for packed in packed_moves.packed.iter() {
+        moves.push_back(unpack_move(packed));
+    }
+    moves
 }
 
 #[contracttype]
@@ -143,6 +180,10 @@ impl Contract {
             .persistent()
             .get(&DataKey::GameLog(address))
             .unwrap_or_else(|| Vec::new(e))
+    }
+
+    pub fn packed_moves_to_moves(e: &Env, packed_moves: PackedMoves) -> Vec<Move> {
+        crate::packed_moves_to_moves(e, packed_moves)
     }
 
     // --- Marketplace ---

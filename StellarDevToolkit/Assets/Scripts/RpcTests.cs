@@ -2,6 +2,7 @@ using UnityEngine;
 using Stellar;
 using Stellar.RPC;
 using StellarSDK;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
@@ -228,6 +229,9 @@ namespace StellarSDK
             Debug.Log("========== SERIALIZATION TESTS ==========");
             await RunSerializationTests(context, c, task);
 
+            Debug.Log("========== GAME LOG TESTS ==========");
+            await RunGameLogTests(context, c, task);
+
             return new Results { Passed = c.Passed, Failed = c.Failed };
         }
 
@@ -269,44 +273,26 @@ namespace StellarSDK
             SCVal makeMapExpected = SMap(Entry(Str("a"), U32(1)), Entry(Str("b"), U32(2)));
             Check("make_map", XdrEq(await Sim(context, "make_map", task, Vec(Str("a"), Str("b")), Vec(U32(1), U32(2))), makeMapExpected), c);
 
-            // --- Struct (Player, sorted alphabetically: active, name, score) ---
+            // --- Struct (Inventory, sorted alphabetically: items, quantities) ---
 
-            SCVal alice = PlayerVal("Alice", 100, true);
-            Check("echo_player", XdrEq(await Sim(context, "echo_player", task, alice), alice), c);
-            Check("make_player(Bob,50)", XdrEq(await Sim(context, "make_player", task, Str("Bob"), U32(50)), PlayerVal("Bob", 50, true)), c);
-            Check("player_name(Charlie)", Eq<string>(await Sim(context, "player_name", task, PlayerVal("Charlie", 0, false)), "Charlie"), c);
-            Check("player_score(Dave,9999)", Eq<uint>(await Sim(context, "player_score", task, PlayerVal("Dave", 9999, true)), 9999), c);
-
-            // --- Nested struct (Inventory, sorted alphabetically: items, owner, quantities) ---
-
-            SCVal invOwner = PlayerVal("Eve", 42, true);
             SCVal invItems = Vec(Str("shield"), Str("sword"));
             SCVal invQuantities = SMap(Entry(Str("shield"), U32(2)), Entry(Str("sword"), U32(1)));
             SCVal inventory = SMap(
                 Entry(Sym("items"), invItems),
-                Entry(Sym("owner"), invOwner),
                 Entry(Sym("quantities"), invQuantities)
             );
             Check("echo_inventory", XdrEq(await Sim(context, "echo_inventory", task, inventory), inventory), c);
 
             SCVal makeInvExpected = SMap(
                 Entry(Sym("items"), Vec(Str("potion"), Str("scroll"))),
-                Entry(Sym("owner"), PlayerVal("Frank", 0, true)),
                 Entry(Sym("quantities"), SMap(Entry(Str("potion"), U32(1)), Entry(Str("scroll"), U32(2))))
             );
-            Check("make_inventory", XdrEq(await Sim(context, "make_inventory", task, Str("Frank"), Vec(Str("potion"), Str("scroll"))), makeInvExpected), c);
+            Check("make_inventory", XdrEq(await Sim(context, "make_inventory", task, Vec(Str("potion"), Str("scroll"))), makeInvExpected), c);
 
             // --- Bytes ---
 
             Check("bytes_len(5)", Eq<uint>(await Sim(context, "bytes_len", task, SBytes(1, 2, 3, 4, 5)), 5), c);
             Check("concat_bytes", XdrEq(await Sim(context, "concat_bytes", task, SBytes(1, 2), SBytes(3, 4)), SBytes(1, 2, 3, 4)), c);
-
-            // --- Multi-return ---
-
-            SCVal gracePlayer = PlayerVal("Grace", 77, true);
-            Check("describe_player(active)", XdrEq(await Sim(context, "describe_player", task, gracePlayer), Vec(Str("Grace"), Str("active"))), c);
-            SCVal hankPlayer = PlayerVal("Hank", 0, false);
-            Check("describe_player(inactive)", XdrEq(await Sim(context, "describe_player", task, hankPlayer), Vec(Str("Hank"), Str("inactive"))), c);
 
             // --- Edge cases ---
 
@@ -318,6 +304,110 @@ namespace StellarSDK
             Check("echo_max_u32", Eq<uint>(await Sim(context, "echo_max_u32", task), uint.MaxValue), c);
             Check("echo_min_i32", Eq<int>(await Sim(context, "echo_min_i32", task), int.MinValue), c);
             Check("echo_max_u64", Eq<ulong>(await Sim(context, "echo_max_u64", task), ulong.MaxValue), c);
+        }
+
+        // Field names must match the contract's GameLog symbol keys so
+        // SCValToNative can map them by reflection.
+#pragma warning disable 0649 // assigned by reflection in SCValToNative
+        struct PackedMovesEntry
+        {
+            public ulong[] packed;
+        }
+
+        struct GameLogEntry
+        {
+            public uint final_score;
+            public PackedMovesEntry packed_moves;
+            public ulong seed;
+            public ulong submitted_ledger_seq;
+        }
+#pragma warning restore 0649
+
+        static async Task RunGameLogTests(NetworkContext context, Counter c, StellarClientTask task)
+        {
+            // Testnet state survives between runs and the contract rejects a seed
+            // it already stored, so each run needs a seed it has never seen.
+            ulong seed = (ulong)DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            const uint FinalScore = 4321;
+            SCVal player = StellarClient.AccountStringToScvAddress(context.userAccount.AccountId);
+            SCVal[] submitArgs = { player, GameLogVal(FinalScore, seed) };
+
+            // --- register_game_log (a write, so it needs a real signed tx) ---
+
+            Debug.Log($"[TEST] register_game_log(seed={seed})...");
+            Result<(SimulateTransactionResult, SendTransactionResult, GetTransactionResult)> submit =
+                await StellarClient.CallContractFunction(context, "register_game_log", submitArgs, task);
+            if (submit.IsError)
+            {
+                Debug.LogError($"[FAIL] register_game_log: {submit.Message}");
+                c.Failed++;
+                return;
+            }
+
+            Debug.Log($"[PASS] register_game_log: txHash={submit.Value.Item2.Hash}, status={submit.Value.Item3.Status}");
+            c.Passed++;
+
+            // --- get_game_logs returns what was just written ---
+
+            GameLogEntry[] logs = await GetGameLogs(context, task, player);
+            int index = IndexOfSeed(logs, seed);
+            Check($"get_game_logs contains seed={seed}", index >= 0, c);
+            if (index >= 0)
+            {
+                Check("final_score round-trips", logs[index].final_score == FinalScore, c);
+                // The client sent 0; a non-zero value means the contract stamped it.
+                Check("submitted_ledger_seq stamped by contract", logs[index].submitted_ledger_seq > 0, c);
+            }
+
+            // --- a repeated seed is rejected, even with a different score ---
+
+            SCVal[] duplicateArgs = { player, GameLogVal(FinalScore + 1, seed) };
+            Result<(SimulateTransactionResult, SendTransactionResult, GetTransactionResult)> duplicate =
+                await StellarClient.CallContractFunction(context, "register_game_log", duplicateArgs, task);
+            Check("register_game_log rejects duplicate seed", duplicate.IsError, c);
+
+            // --- an address that never submitted has no logs ---
+
+            SCVal stranger = StellarClient.AccountStringToScvAddress(MuxedAccount.Random().AccountId);
+            GameLogEntry[] strangerLogs = await GetGameLogs(context, task, stranger);
+            Check("get_game_logs is empty for an unknown address", strangerLogs != null && strangerLogs.Length == 0, c);
+        }
+
+        static async Task<GameLogEntry[]> GetGameLogs(NetworkContext context, StellarClientTask task, SCVal address)
+        {
+            SCVal result = await Sim(context, "get_game_logs", task, address);
+            if (result == null)
+            {
+                return null;
+            }
+
+            try
+            {
+                return SCUtility.SCValToNative<GameLogEntry[]>(result);
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"  Failed decoding get_game_logs result: {ex.Message}");
+                return null;
+            }
+        }
+
+        static int IndexOfSeed(GameLogEntry[] logs, ulong seed)
+        {
+            if (logs == null)
+            {
+                return -1;
+            }
+
+            for (int i = 0; i < logs.Length; i++)
+            {
+                if (logs[i].seed == seed)
+                {
+                    return i;
+                }
+            }
+
+            return -1;
         }
 
         static async Task<SCVal> Sim(NetworkContext context, string fn, StellarClientTask task, params SCVal[] args)
@@ -359,11 +449,14 @@ namespace StellarSDK
         static SCVal SMap(params SCMapEntry[] entries) => new SCVal.ScvMap { map = new SCMap(entries) };
         static SCMapEntry Entry(SCVal key, SCVal val) => new SCMapEntry { key = key, val = val };
 
-        static SCVal PlayerVal(string name, uint score, bool active) =>
+        // GameLog, sorted alphabetically: final_score, packed_moves, seed, submitted_ledger_seq.
+        // submitted_ledger_seq is whatever the contract stamps, so send 0.
+        static SCVal GameLogVal(uint finalScore, ulong seed) =>
             SMap(
-                Entry(Sym("active"), Bool(active)),
-                Entry(Sym("name"), Str(name)),
-                Entry(Sym("score"), U32(score))
+                Entry(Sym("final_score"), U32(finalScore)),
+                Entry(Sym("packed_moves"), SMap(Entry(Sym("packed"), Vec()))),
+                Entry(Sym("seed"), U64(seed)),
+                Entry(Sym("submitted_ledger_seq"), U64(0))
             );
     }
 }
