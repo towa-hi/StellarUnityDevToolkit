@@ -13,6 +13,10 @@ public class GameUI : MonoBehaviour
         UnsubscribeFromController();
         gameController = controller;
         ResolveGameOverPopup();
+        if (gameOverPopup != null)
+        {
+            gameOverPopup.Initialize(controller);
+        }
         SubscribeToController();
         HideGameOverPopup();
         SyncScoreDisplay();

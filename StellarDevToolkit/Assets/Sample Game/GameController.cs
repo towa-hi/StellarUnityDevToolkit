@@ -2,7 +2,11 @@ using UnityEngine;
 using UnityEngine.Serialization;
 using System.Collections.Generic;
 using System;
+using System.Threading.Tasks;
 using DG.Tweening;
+using Stellar;
+using Stellar.RPC;
+using StellarSDK;
 
 public class GameController : MonoBehaviour
 {
@@ -40,6 +44,7 @@ public class GameController : MonoBehaviour
     Tween dropSettleTween = null;
     readonly List<Vector2Int> previewCoordsBuffer = new List<Vector2Int>();
     readonly List<BoardCell> placementCellsBuffer = new List<BoardCell>();
+    bool isSubmittingGameLog = false;
 
     void Awake()
     {
@@ -81,6 +86,76 @@ public class GameController : MonoBehaviour
         InitializeScene();
         gameState.Phase = GamePhase.WaitingForDrag;
     }
+
+    public async void SubmitGameLog()
+    {
+        if (isSubmittingGameLog)
+        {
+            return;
+        }
+
+        if (gameState == null)
+        {
+            Debug.LogWarning("GameController: Cannot submit game log without an active game.", this);
+            return;
+        }
+
+        if (GameManager.Instance == null)
+        {
+            Debug.LogWarning("GameController: Cannot submit game log without GameManager.", this);
+            return;
+        }
+
+        NetworkContext context = GameManager.Instance.CurrentNetworkContext;
+        if (context.userAccount == null)
+        {
+            Debug.LogWarning("GameController: Cannot submit game log without a signed-in account.", this);
+            return;
+        }
+
+        isSubmittingGameLog = true;
+        try
+        {
+            SCVal player = StellarClient.AccountStringToScvAddress(context.userAccount.AccountId);
+            SCVal[] args = { player, BuildGameLogVal() };
+            Debug.Log($"GameController: register_game_log seed={gameState.GameSeed} score={gameState.Score} moves={gameState.PackedMoves.Count}.", this);
+            Result<(SimulateTransactionResult, SendTransactionResult, GetTransactionResult)> result =
+                await StellarClient.CallContractFunction(context, "register_game_log", args, GameManager.Instance.ClientTask);
+            if (result.IsError)
+            {
+                Debug.LogError($"GameController: register_game_log failed: {result.Message}", this);
+                return;
+            }
+
+            Debug.Log($"GameController: register_game_log succeeded txHash={result.Value.Item2.Hash} status={result.Value.Item3.Status}.", this);
+        }
+        catch (Exception exception)
+        {
+            Debug.LogError($"GameController: register_game_log threw {exception.Message}", this);
+        }
+        finally
+        {
+            isSubmittingGameLog = false;
+        }
+    }
+
+    SCVal BuildGameLogVal()
+    {
+        ulong[] packed = gameState.PackedMoves.ToArray();
+        uint finalScore = gameState.Score < 0 ? 0u : (uint)gameState.Score;
+        return SMap(
+            Entry(Sym("final_score"), U32(finalScore)),
+            Entry(Sym("packed_moves"), SMap(Entry(Sym("packed"), NativeVec(packed)))),
+            Entry(Sym("seed"), U64(gameState.GameSeed)),
+            Entry(Sym("submitted_ledger_seq"), U64(0)));
+    }
+
+    static SCVal U32(uint value) => new SCVal.ScvU32 { u32 = new uint32(value) };
+    static SCVal U64(ulong value) => new SCVal.ScvU64 { u64 = new uint64(value) };
+    static SCVal Sym(string value) => new SCVal.ScvSymbol { sym = new SCSymbol(value) };
+    static SCVal NativeVec(ulong[] values) => SCUtility.NativeToSCVal(values);
+    static SCVal SMap(params SCMapEntry[] entries) => new SCVal.ScvMap { map = new SCMap(entries) };
+    static SCMapEntry Entry(SCVal key, SCVal val) => new SCMapEntry { key = key, val = val };
 
     public void ClearScene()
     {

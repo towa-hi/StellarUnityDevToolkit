@@ -1,6 +1,8 @@
 #![no_std]
 use soroban_sdk::{*};
 
+mod game;
+
 #[contracterror]
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
 pub enum Error {
@@ -148,6 +150,13 @@ impl Contract {
             .get(&game_log_key)
             .unwrap_or_else(|| Vec::new(e));
 
+        // Replay the packed moves from the seed. final_score is untrusted
+        // until this check; a mismatch or illegal log is rejected.
+        let computed_score = game::validate_game_log(&game_log)?;
+        if computed_score != game_log.final_score {
+            return Err(Error::InvalidGameLog);
+        }
+
         // One log per seed: a replayed seed is a duplicate submission.
         for log in game_logs.iter() {
             if log.seed == game_log.seed {
@@ -155,8 +164,6 @@ impl Contract {
             }
         }
 
-        // final_score is client-supplied and untrusted until the replay
-        // verifier can recompute it from the log.
         game_logs.push_back(GameLog {
             submitted_ledger_seq: e.ledger().sequence() as u64,
             ..game_log

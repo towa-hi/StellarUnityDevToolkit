@@ -16,6 +16,9 @@ public class GameManager : MonoBehaviour
 
     public static GameManager Instance { get; private set; }
 
+    public NetworkContext CurrentNetworkContext => context;
+    public StellarClientTask ClientTask => clientTask;
+
     public DefaultSettings defaultSettings;
     public CommunicationDiagram communicationDiagram;
 

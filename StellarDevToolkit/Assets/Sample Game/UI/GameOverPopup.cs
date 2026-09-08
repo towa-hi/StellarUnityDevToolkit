@@ -6,18 +6,25 @@ public class GameOverPopup : MonoBehaviour
     [SerializeField] Button backButton = null;
     [SerializeField] Button submitButton = null;
 
-    void Awake()
+    GameController gameController = null;
+
+    public void Initialize(GameController controller)
     {
-        ResolveButtons();
+        gameController = controller;
     }
 
     void OnEnable()
     {
-        ResolveButtons();
         if (backButton != null)
         {
             backButton.onClick.RemoveListener(HandleBackClicked);
             backButton.onClick.AddListener(HandleBackClicked);
+        }
+
+        if (submitButton != null)
+        {
+            submitButton.onClick.RemoveListener(HandleSubmitClicked);
+            submitButton.onClick.AddListener(HandleSubmitClicked);
         }
     }
 
@@ -26,6 +33,11 @@ public class GameOverPopup : MonoBehaviour
         if (backButton != null)
         {
             backButton.onClick.RemoveListener(HandleBackClicked);
+        }
+
+        if (submitButton != null)
+        {
+            submitButton.onClick.RemoveListener(HandleSubmitClicked);
         }
     }
 
@@ -42,32 +54,22 @@ public class GameOverPopup : MonoBehaviour
         gameObject.SetActive(false);
     }
 
-    void ResolveButtons()
-    {
-        if (backButton == null)
-        {
-            Transform back = transform.Find("Back Button");
-            if (back != null)
-            {
-                backButton = back.GetComponent<Button>();
-            }
-        }
-
-        if (submitButton == null)
-        {
-            Transform submit = transform.Find("Submit Button");
-            if (submit != null)
-            {
-                submitButton = submit.GetComponent<Button>();
-            }
-        }
-    }
-
     void HandleBackClicked()
     {
         if (GameManager.Instance != null)
         {
             GameManager.Instance.ReturnToPluginDemo();
         }
+    }
+
+    void HandleSubmitClicked()
+    {
+        if (gameController != null)
+        {
+            gameController.SubmitGameLog();
+            return;
+        }
+
+        Debug.LogWarning("GameOverPopup: Submit clicked but GameController is missing.", this);
     }
 }

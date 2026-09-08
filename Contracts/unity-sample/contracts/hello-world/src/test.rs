@@ -246,12 +246,11 @@ fn empty_packed_moves(env: &Env) -> PackedMoves {
     }
 }
 
-fn game_log(env: &Env, final_score: u32, seed: u64) -> GameLog {
+fn unfinished_game_log(env: &Env, final_score: u32, seed: u64) -> GameLog {
     GameLog {
         final_score,
         packed_moves: empty_packed_moves(env),
         seed,
-        // Overwritten by the contract; a bogus value proves it is ignored.
         submitted_ledger_seq: u64::MAX,
     }
 }
@@ -266,24 +265,27 @@ fn pack_move(x: i8, y: i8, shape: u32) -> u64 {
 #[test]
 fn test_register_game_log_persists_and_stamps_ledger_seq() {
     let (env, client, player) = setup_game_log();
+    let log = crate::game::greedy_game_log(&env, 42);
 
-    client.register_game_log(&player, &game_log(&env, 1234, 42));
+    client.register_game_log(&player, &log);
 
     let logs = client.get_game_logs(&player);
     assert_eq!(logs.len(), 1);
-    let log = logs.get(0).unwrap();
-    assert_eq!(log.final_score, 1234);
-    assert_eq!(log.seed, 42);
-    assert_eq!(log.submitted_ledger_seq, env.ledger().sequence() as u64);
-    assert_eq!(log.packed_moves.packed.len(), 0);
+    let stored = logs.get(0).unwrap();
+    assert_eq!(stored.final_score, log.final_score);
+    assert_eq!(stored.seed, 42);
+    assert_eq!(stored.submitted_ledger_seq, env.ledger().sequence() as u64);
+    assert_eq!(stored.packed_moves, log.packed_moves);
 }
 
 #[test]
 fn test_register_game_log_appends_distinct_seeds_in_order() {
     let (env, client, player) = setup_game_log();
+    let first = crate::game::greedy_game_log(&env, 1);
+    let second = crate::game::greedy_game_log(&env, 2);
 
-    client.register_game_log(&player, &game_log(&env, 10, 1));
-    client.register_game_log(&player, &game_log(&env, 20, 2));
+    client.register_game_log(&player, &first);
+    client.register_game_log(&player, &second);
 
     let logs = client.get_game_logs(&player);
     assert_eq!(logs.len(), 2);
@@ -294,20 +296,32 @@ fn test_register_game_log_appends_distinct_seeds_in_order() {
 #[test]
 fn test_register_game_log_rejects_duplicate_seed() {
     let (env, client, player) = setup_game_log();
+    let log = crate::game::greedy_game_log(&env, 7);
 
-    client.register_game_log(&player, &game_log(&env, 10, 7));
+    client.register_game_log(&player, &log);
 
-    // A different score does not make it a different submission.
-    let result = client.try_register_game_log(&player, &game_log(&env, 99, 7));
+    let result = client.try_register_game_log(&player, &log);
     assert_eq!(result, Err(Ok(Error::AlreadyExists)));
     assert_eq!(client.get_game_logs(&player).len(), 1);
 }
 
 #[test]
+fn test_register_game_log_rejects_score_mismatch() {
+    let (env, client, player) = setup_game_log();
+    let mut log = crate::game::greedy_game_log(&env, 11);
+    log.final_score = log.final_score.saturating_add(1);
+
+    let result = client.try_register_game_log(&player, &log);
+    assert_eq!(result, Err(Ok(Error::InvalidGameLog)));
+    assert_eq!(client.get_game_logs(&player).len(), 0);
+}
+
+#[test]
 fn test_register_game_log_auto_registers_player() {
     let (env, client, player) = setup_game_log();
+    let log = crate::game::greedy_game_log(&env, 1);
 
-    client.register_game_log(&player, &game_log(&env, 10, 1));
+    client.register_game_log(&player, &log);
 
     // The player record now exists, so registering again is rejected.
     let result = client.try_register_player(&player, &String::from_str(&env, "Alice"));
@@ -318,14 +332,15 @@ fn test_register_game_log_auto_registers_player() {
 fn test_game_logs_are_scoped_per_address() {
     let (env, client, player_a) = setup_game_log();
     let player_b = Address::generate(&env);
+    let log = crate::game::greedy_game_log(&env, 1);
 
-    client.register_game_log(&player_a, &game_log(&env, 10, 1));
+    client.register_game_log(&player_a, &log);
 
     assert_eq!(client.get_game_logs(&player_a).len(), 1);
     assert_eq!(client.get_game_logs(&player_b).len(), 0);
 
     // The same seed under a different address is not a duplicate.
-    client.register_game_log(&player_b, &game_log(&env, 20, 1));
+    client.register_game_log(&player_b, &log);
     assert_eq!(client.get_game_logs(&player_b).len(), 1);
 }
 
@@ -370,25 +385,49 @@ fn test_packed_moves_to_moves_unpacks_x_y_shape() {
 }
 
 #[test]
+fn test_validate_game_log_replays_greedy_score() {
+    let env = Env::default();
+    let log = crate::game::greedy_game_log(&env, 99);
+    assert!(log.packed_moves.packed.len() > 0);
+    assert_eq!(crate::game::validate_game_log(&log), Ok(log.final_score));
+}
+
+#[test]
+fn test_validate_game_log_rejects_unfinished_game() {
+    let env = Env::default();
+    let log = unfinished_game_log(&env, 0, 1);
+    assert_eq!(
+        crate::game::validate_game_log(&log),
+        Err(Error::InvalidGameLog)
+    );
+}
+
+#[test]
+fn test_validate_game_log_rejects_shape_not_in_offer() {
+    let env = Env::default();
+    let mut log = crate::game::greedy_game_log(&env, 5);
+    let first = log.packed_moves.packed.get(0).unwrap();
+    log.packed_moves.packed.set(0, first ^ 1);
+
+    assert_eq!(
+        crate::game::validate_game_log(&log),
+        Err(Error::InvalidGameLog)
+    );
+}
+
+#[test]
 fn test_register_game_log_persists_packed_moves() {
     let (env, client, player) = setup_game_log();
-    let packed_moves = PackedMoves {
-        packed: vec![&env, pack_move(-2, 5, 30720), pack_move(1, 3, 405504)],
-    };
-    let mut log = game_log(&env, 1234, 42);
-    log.packed_moves = packed_moves.clone();
+    let log = crate::game::greedy_game_log(&env, 42);
 
     client.register_game_log(&player, &log);
 
     let stored = client.get_game_logs(&player).get(0).unwrap();
-    assert_eq!(stored.packed_moves, packed_moves);
-    let moves = packed_moves_to_moves(&env, stored.packed_moves);
-    assert_eq!(moves.get(0).unwrap().x, -2);
-    assert_eq!(moves.get(0).unwrap().y, 5);
-    assert_eq!(moves.get(0).unwrap().shape, 30720);
-    assert_eq!(moves.get(1).unwrap().x, 1);
-    assert_eq!(moves.get(1).unwrap().y, 3);
-    assert_eq!(moves.get(1).unwrap().shape, 405504);
+    assert_eq!(stored.packed_moves, log.packed_moves);
+    assert_eq!(
+        crate::game::validate_game_log(&stored),
+        Ok(stored.final_score)
+    );
 }
 
 #[test]
