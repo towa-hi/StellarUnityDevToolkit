@@ -14,6 +14,7 @@ public class GameState
     public GamePhase Phase;
     public int Score;
     public int CurrentStreak;
+    public int LongestStreak;
     public uint GameSeed;
     public IntegerRng Random;
     public readonly List<byte> PackedMoves;
@@ -25,6 +26,7 @@ public class GameState
         Phase = GamePhase.WaitingForDrag;
         Score = 0;
         CurrentStreak = 0;
+        LongestStreak = 0;
         GameSeed = seed;
         Random = new IntegerRng(seed);
         PackedMoves = new List<byte>();

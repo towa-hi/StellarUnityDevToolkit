@@ -93,6 +93,7 @@ pub enum DataKey {
     Listing(u32),
     ActiveListings,
     GameLog(Address), // list of logs for a player
+    ScoreNft,
 }
 
 #[contracttype]
@@ -121,8 +122,21 @@ pub struct Listing {
 // can cross-call it without importing the OZ crate.
 #[contractclient(name = "NftClient")]
 pub trait Nft {
+    fn mint(e: Env, to: Address, points: u32) -> u32;
     fn transfer(e: Env, from: Address, to: Address, token_id: u32);
     fn owner_of(e: Env, token_id: u32) -> Address;
+}
+
+pub(crate) fn highest_score_asset(score: u32) -> Option<u32> {
+    if score >= 500 {
+        Some(500)
+    } else if score >= 100 {
+        Some(100)
+    } else if score >= 50 {
+        Some(50)
+    } else {
+        None
+    }
 }
 
 #[contract]
@@ -177,7 +191,7 @@ impl Contract {
         persistent.set(&game_log_key, &game_logs);
 
         // Auto-register so a log always has a player record behind it.
-        let player_key = DataKey::Player(address);
+        let player_key = DataKey::Player(address.clone());
         if !persistent.has(&player_key) {
             let player = Player {
                 name: String::from_str(e, "unnamed player"),
@@ -185,6 +199,22 @@ impl Contract {
             persistent.set(&player_key, &player);
         }
 
+        if let Some(points) = highest_score_asset(computed_score) {
+            if let Some(nft) = e.storage().instance().get::<_, Address>(&DataKey::ScoreNft) {
+                NftClient::new(e, &nft).mint(&address, &points);
+            }
+        }
+
+        Ok(())
+    }
+
+    pub fn set_score_nft(e: &Env, setter: Address, nft: Address) -> Result<(), Error> {
+        let instance = e.storage().instance();
+        if instance.has(&DataKey::ScoreNft) {
+            return Err(Error::AlreadyInitialized);
+        }
+        setter.require_auth();
+        instance.set(&DataKey::ScoreNft, &nft);
         Ok(())
     }
 

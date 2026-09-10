@@ -1,3 +1,5 @@
+using System;
+using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
 
@@ -5,6 +7,8 @@ public class GameOverPopup : MonoBehaviour
 {
     [SerializeField] Button backButton = null;
     [SerializeField] Button submitButton = null;
+    [SerializeField] Button retryButton = null;
+    [SerializeField] TextMeshProUGUI infoText = null;
 
     GameController gameController = null;
 
@@ -21,6 +25,12 @@ public class GameOverPopup : MonoBehaviour
             backButton.onClick.AddListener(HandleBackClicked);
         }
 
+        if (retryButton != null)
+        {
+            retryButton.onClick.RemoveListener(HandleRetryClicked);
+            retryButton.onClick.AddListener(HandleRetryClicked);
+        }
+
         if (submitButton != null)
         {
             submitButton.onClick.RemoveListener(HandleSubmitClicked);
@@ -35,6 +45,11 @@ public class GameOverPopup : MonoBehaviour
             backButton.onClick.RemoveListener(HandleBackClicked);
         }
 
+        if (retryButton != null)
+        {
+            retryButton.onClick.RemoveListener(HandleRetryClicked);
+        }
+
         if (submitButton != null)
         {
             submitButton.onClick.RemoveListener(HandleSubmitClicked);
@@ -43,15 +58,27 @@ public class GameOverPopup : MonoBehaviour
 
     public void Show()
     {
-        Debug.Log($"GameOverPopup: Show before activeSelf={gameObject.activeSelf} activeInHierarchy={gameObject.activeInHierarchy}.", this);
+        SetButtonsInteractable(true);
+        RefreshInfoText();
         gameObject.SetActive(true);
-        Debug.Log($"GameOverPopup: Show after activeSelf={gameObject.activeSelf} activeInHierarchy={gameObject.activeInHierarchy} worldPos={transform.position}.", this);
     }
 
     public void Hide()
     {
-        Debug.Log($"GameOverPopup: Hide activeSelf={gameObject.activeSelf}.", this);
         gameObject.SetActive(false);
+    }
+
+    void RefreshInfoText()
+    {
+        if (infoText == null)
+        {
+            return;
+        }
+
+        int pieces = gameController != null ? gameController.PiecesPlaced : 0;
+        int score = gameController != null ? gameController.Score : 0;
+        int longest = gameController != null ? gameController.LongestStreak : 0;
+        infoText.text = $"Number of placed pieces: {pieces}\nYour final score: {score}\nYour longest streak: {longest}";
     }
 
     void HandleBackClicked()
@@ -62,14 +89,56 @@ public class GameOverPopup : MonoBehaviour
         }
     }
 
-    void HandleSubmitClicked()
+    void HandleRetryClicked()
     {
         if (gameController != null)
         {
-            gameController.SubmitGameLog();
+            gameController.StartNewGame();
             return;
         }
 
-        Debug.LogWarning("GameOverPopup: Submit clicked but GameController is missing.", this);
+        Debug.LogWarning("GameOverPopup: Retry clicked but GameController is missing.", this);
+    }
+
+    async void HandleSubmitClicked()
+    {
+        if (gameController == null)
+        {
+            Debug.LogWarning("GameOverPopup: Submit clicked but GameController is missing.", this);
+            return;
+        }
+
+        SetButtonsInteractable(false);
+        try
+        {
+            bool submitted = await gameController.SubmitGameLog();
+            if (!submitted)
+            {
+                SetButtonsInteractable(true);
+            }
+        }
+        catch (Exception exception)
+        {
+            Debug.LogError($"GameOverPopup: Submit failed: {exception.Message}", this);
+            SetButtonsInteractable(true);
+        }
+    }
+
+    void SetButtonsInteractable(bool interactable)
+    {
+        if (backButton != null)
+        {
+            backButton.interactable = interactable;
+        }
+
+        if (retryButton != null)
+        {
+            retryButton.interactable = interactable;
+        }
+
+        if (submitButton != null)
+        {
+            submitButton.interactable = interactable;
+        }
     }
 }

@@ -237,7 +237,7 @@ namespace StellarSDK
             return Result<AccountEntry>.Ok(entry?.account);
         }
 
-        public static async Task<Result<SorobanInvocationMeta>> InvokeSEP50AssetMint(NetworkContext context, string assetOwnerAddressOverride = null, StellarClientTask task = null)
+        public static async Task<Result<SorobanInvocationMeta>> InvokeSEP50AssetMint(NetworkContext context, string assetOwnerAddressOverride = null, uint points = 50, StellarClientTask task = null)
         {
             using var _ = new StellarClientTask.Scope(task, "InvokeSEP50AssetMint");
             SCVal.ScvAddress ownerAddress = !string.IsNullOrWhiteSpace(assetOwnerAddressOverride)
@@ -245,6 +245,7 @@ namespace StellarSDK
                 : AccountStringToScvAddress(context.userAccount.AccountId);
             var result = await CallContractFunction(context, "mint", new SCVal[] {
                 ownerAddress,
+                new SCVal.ScvU32 { u32 = new uint32(points) },
             }, task);
             if (result.IsError)
             {
@@ -377,6 +378,30 @@ namespace StellarSDK
             return Result<string>.Ok(stringTokenUri.str.InnerValue);
         }
 
+        public static async Task<Result<int>> SimSEP50AssetPoints(NetworkContext context, int tokenId, StellarClientTask task = null)
+        {
+            using var _ = new StellarClientTask.Scope(task, "SimSEP50AssetPoints");
+            var result = await SimulateContractFunction(context, "asset_points", new SCVal[] {
+                new SCVal.ScvU32 { u32 = new uint32(checked((uint)tokenId)) },
+            }, true, task);
+            if (result.IsError)
+            {
+                Debug.LogError($"SimSEP50AssetPoints simulation failed: code={result.Code}, message={result.Message}");
+                return Result<int>.Err(result);
+            }
+            SimulateTransactionResult simulation = result.Value.Item2;
+            SCVal rawPoints = simulation.Results?.FirstOrDefault()?.Result;
+            if (rawPoints == null)
+            {
+                return Result<int>.Err(StatusCode.DESERIALIZATION_ERROR, "SimSEP50AssetPoints failed because simulation returned no points value.");
+            }
+            if (rawPoints is not SCVal.ScvU32 u32Points)
+            {
+                return Result<int>.Err(StatusCode.DESERIALIZATION_ERROR, $"SimSEP50AssetPoints expected u32 points, got {rawPoints.GetType().Name}.");
+            }
+            return Result<int>.Ok(checked((int)u32Points.u32.InnerValue));
+        }
+
         public static async Task<Result<int>> SimSEP50AssetTotal_Supply(NetworkContext context, StellarClientTask task = null)
         {
             using var _ = new StellarClientTask.Scope(task, "SimSEP50AssetTotal_Supply");
@@ -398,6 +423,30 @@ namespace StellarSDK
             }
             int parsedTotalSupply = checked((int)u32TotalSupply.u32.InnerValue);
             return Result<int>.Ok(parsedTotalSupply);
+        }
+
+        public static async Task<Result<int>> SimSEP50AssetGetTokenId(NetworkContext context, int index, StellarClientTask task = null)
+        {
+            using var _ = new StellarClientTask.Scope(task, "SimSEP50AssetGetTokenId");
+            var result = await SimulateContractFunction(context, "get_token_id", new SCVal[] {
+                new SCVal.ScvU32 { u32 = new uint32(checked((uint)index)) },
+            }, true, task);
+            if (result.IsError)
+            {
+                Debug.LogError($"SimSEP50AssetGetTokenId simulation failed: code={result.Code}, message={result.Message}");
+                return Result<int>.Err(result);
+            }
+            SimulateTransactionResult simulation = result.Value.Item2;
+            SCVal rawTokenId = simulation.Results?.FirstOrDefault()?.Result;
+            if (rawTokenId == null)
+            {
+                return Result<int>.Err(StatusCode.DESERIALIZATION_ERROR, "SimSEP50AssetGetTokenId failed because simulation returned no token id.");
+            }
+            if (rawTokenId is not SCVal.ScvU32 u32TokenId)
+            {
+                return Result<int>.Err(StatusCode.DESERIALIZATION_ERROR, $"SimSEP50AssetGetTokenId expected u32 token id, got {rawTokenId.GetType().Name}.");
+            }
+            return Result<int>.Ok(checked((int)u32TokenId.u32.InnerValue));
         }
 
         public static async Task<Result<Dictionary<int, string>>> ReqSEP50AssetOwnerMap(NetworkContext context, StellarClientTask task = null)
@@ -425,7 +474,14 @@ namespace StellarSDK
                 var expectedTokenIds = new int[batchCount];
                 for (int i = 0; i < batchCount; i++)
                 {
-                    int tokenId = batchStart + i;
+                    int index = batchStart + i;
+                    Result<int> tokenIdResult = await SimSEP50AssetGetTokenId(context, index, task);
+                    if (tokenIdResult.IsError)
+                    {
+                        return Result<Dictionary<int, string>>.Err(tokenIdResult);
+                    }
+
+                    int tokenId = tokenIdResult.Value;
                     expectedTokenIds[i] = tokenId;
                     keys[i] = EncodedOwnerLedgerKey(context, tokenId);
                 }

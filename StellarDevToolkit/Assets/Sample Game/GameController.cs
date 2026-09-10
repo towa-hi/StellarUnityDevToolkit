@@ -13,8 +13,10 @@ public class GameController : MonoBehaviour
 {
     public event Action<int, int> ScoreChanged;
     public event Action<int> StreakChanged;
+    public event Action<int, int, int> StatsChanged;
     public event Action GameOver;
     public event Action SceneCleared;
+    public event Action<int?> GameLogSubmitted;
 
     const int DropSnapRangeTiles = 1;
 
@@ -34,6 +36,8 @@ public class GameController : MonoBehaviour
     public GamePhase State => gameState != null ? gameState.Phase : GamePhase.NotStarted;
     public int Score => gameState != null ? gameState.Score : 0;
     public int CurrentStreak => gameState != null ? gameState.CurrentStreak : 0;
+    public int LongestStreak => gameState != null ? gameState.LongestStreak : 0;
+    public int PiecesPlaced => gameState != null ? gameState.PackedMoves.Count : 0;
     public uint GameSeed => gameState != null ? gameState.GameSeed : 0u;
 
     GameState gameState = null;
@@ -107,6 +111,7 @@ public class GameController : MonoBehaviour
 
             InitializeScene();
             gameState.Phase = GamePhase.WaitingForDrag;
+            NotifyStatsChanged();
         }
         finally
         {
@@ -114,56 +119,81 @@ public class GameController : MonoBehaviour
         }
     }
 
-    public async void SubmitGameLog()
+    public async Task<bool> SubmitGameLog()
     {
         if (isSubmittingGameLog)
         {
-            return;
+            return false;
         }
 
         if (gameState == null)
         {
             Debug.LogWarning("GameController: Cannot submit game log without an active game.", this);
-            return;
+            return false;
         }
 
         if (GameManager.Instance == null)
         {
             Debug.LogWarning("GameController: Cannot submit game log without GameManager.", this);
-            return;
+            return false;
         }
 
         NetworkContext context = GameManager.Instance.CurrentNetworkContext;
         if (context.userAccount == null)
         {
             Debug.LogWarning("GameController: Cannot submit game log without a signed-in account.", this);
-            return;
+            return false;
         }
 
+        int score = gameState.Score;
         isSubmittingGameLog = true;
         try
         {
             SCVal player = StellarClient.AccountStringToScvAddress(context.userAccount.AccountId);
             SCVal[] args = { player, BuildGameLogVal() };
-            Debug.Log($"GameController: register_game_log seed={gameState.GameSeed} score={gameState.Score} moves={gameState.PackedMoves.Count}.", this);
+            Debug.Log($"GameController: register_game_log seed={gameState.GameSeed} score={score} moves={gameState.PackedMoves.Count}.", this);
             Result<(SimulateTransactionResult, SendTransactionResult, GetTransactionResult)> result =
                 await StellarClient.CallContractFunction(context, "register_game_log", args, GameManager.Instance.ClientTask);
             if (result.IsError)
             {
                 Debug.LogError($"GameController: register_game_log failed: {result.Message}", this);
-                return;
+                return false;
             }
 
             Debug.Log($"GameController: register_game_log succeeded txHash={result.Value.Item2.Hash} status={result.Value.Item3.Status}.", this);
+            int? rewardPoints = HighestScoreAsset(score);
+            GameLogSubmitted?.Invoke(rewardPoints);
+            return true;
         }
         catch (Exception exception)
         {
             Debug.LogError($"GameController: register_game_log threw {exception.Message}", this);
+            return false;
         }
         finally
         {
             isSubmittingGameLog = false;
         }
+    }
+
+    static int? HighestScoreAsset(int score)
+    {
+        if (score >= 500)
+        {
+            return 500;
+        }
+
+        if (score >= 100)
+        {
+            return 100;
+        }
+
+        if (score >= 50)
+        {
+            return 50;
+        }
+
+        return null;
     }
 
     SCVal BuildGameLogVal()
@@ -282,6 +312,7 @@ public class GameController : MonoBehaviour
         }
 
         gameState = null;
+        NotifyStatsChanged();
         SceneCleared?.Invoke();
     }
 
@@ -503,6 +534,7 @@ public class GameController : MonoBehaviour
             gameState.PackedMoves.Add(GameMovePacking.Pack(dropCell.x, dropCell.y, trayIndex));
         }
 
+        NotifyStatsChanged();
         return true;
     }
 
@@ -1033,6 +1065,16 @@ public class GameController : MonoBehaviour
         }
 
         gameState.CurrentStreak = newStreak;
+        if (newStreak > gameState.LongestStreak)
+        {
+            gameState.LongestStreak = newStreak;
+        }
+
         StreakChanged?.Invoke(gameState.CurrentStreak);
+    }
+
+    void NotifyStatsChanged()
+    {
+        StatsChanged?.Invoke(PiecesPlaced, Score, CurrentStreak);
     }
 }

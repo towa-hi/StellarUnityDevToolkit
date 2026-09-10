@@ -46,6 +46,10 @@ public class GameManager : MonoBehaviour
         Market,
         Game
     }
+
+    public TopLevelWindow CurrentTopLevelWindow { get; private set; } = TopLevelWindow.Connection;
+    public event Action<TopLevelWindow> OnTopLevelWindowChanged;
+    public event Action<NetworkContext> OnNetworkContextChanged;
     void Awake()
     {
         if (Instance == null)
@@ -136,6 +140,7 @@ public class GameManager : MonoBehaviour
 
     public void ShowWindow(TopLevelWindow window)
     {
+        CurrentTopLevelWindow = window;
         SetWindowActive(connectionWindow, window == TopLevelWindow.Connection);
         SetWindowActive(mainWindow, window == TopLevelWindow.Main);
         SetWindowActive(marketWindow, window == TopLevelWindow.Market);
@@ -153,6 +158,8 @@ public class GameManager : MonoBehaviour
                 marketWindow?.Refresh();
                 break;
         }
+
+        OnTopLevelWindowChanged?.Invoke(window);
     }
 
     public void ShowMainWindow()
@@ -273,6 +280,7 @@ public class GameManager : MonoBehaviour
             networkContextWindow.PopulateNetworkContext(context);
         }
         testWindow?.PopulateDefaultFields(refreshOwnerFromContext: true);
+        OnNetworkContextChanged?.Invoke(context);
     }
 
     public static async Task<Result<string>> SignWithUnityWallet(string unsignedEnvelope, string networkPassphrase)
@@ -350,8 +358,12 @@ public class GameManager : MonoBehaviour
         return context.userAccount != null ? context.userAccount.AccountId : string.Empty;
     }
 
-    public async Task<Result<SorobanInvocationMeta>> MintSEP50AssetAsync(string assetContractAddress, string ownerAddress = null)
+    public async Task<Result<SorobanInvocationMeta>> MintSEP50AssetAsync(string assetContractAddress, string ownerAddress = null, uint points = 50)
     {
+        if (points != 50 && points != 100 && points != 500)
+        {
+            return Result<SorobanInvocationMeta>.Err(StatusCode.OTHER_ERROR, "MintSEP50Asset: points must be 50, 100, or 500.");
+        }
         string normalizedAssetContractAddress = string.IsNullOrWhiteSpace(assetContractAddress) ? null : assetContractAddress.Trim();
         if (normalizedAssetContractAddress == null)
         {
@@ -368,7 +380,7 @@ public class GameManager : MonoBehaviour
         }
         NetworkContext overwrittenContext = context;
         overwrittenContext.contractAddress = normalizedAssetContractAddress;
-        return await StellarClient.InvokeSEP50AssetMint(overwrittenContext, normalizedOwnerOverride, clientTask);
+        return await StellarClient.InvokeSEP50AssetMint(overwrittenContext, normalizedOwnerOverride, points, clientTask);
     }
 
     public async Task<Result<int>> GetSEP50AssetBalanceAsync(string assetContractAddress, string ownerAddress = null)

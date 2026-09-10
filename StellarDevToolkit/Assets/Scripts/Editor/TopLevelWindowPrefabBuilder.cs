@@ -213,13 +213,16 @@ public static class TopLevelWindowPrefabBuilder
     static GameObject BuildGameWindow()
     {
         GameObject window = CreateShell("Game Window", "GAME");
-        window.AddComponent<GameWindow>();
         Transform stack = CreateBodyStack(window);
-        GameObject placeholder = (GameObject)PrefabUtility.InstantiatePrefab(bodyTextPrefab, stack);
-        placeholder.name = "Placeholder Text";
-        AddLayoutElement(placeholder, 24f, -1f);
-        placeholder.GetComponent<TextMeshProUGUI>().text = "In-game UI goes here.";
+        GameWindow gameWindow = window.AddComponent<GameWindow>();
+        gameWindow.piecesPlacedText = CreateEntry(stack, "VLG Entry Pieces Placed", "PLACED");
+        gameWindow.pointsText = CreateEntry(stack, "VLG Entry Points", "POINTS");
+        gameWindow.streakText = CreateEntry(stack, "VLG Entry Streak", "STREAK");
+        gameWindow.piecesPlacedText.text = "0";
+        gameWindow.pointsText.text = "0";
+        gameWindow.streakText.text = "0";
         AddSpacer(stack);
+        gameWindow.quitButton = CreateButton(stack, "Button Quit", "QUIT GAME");
         return window;
     }
 

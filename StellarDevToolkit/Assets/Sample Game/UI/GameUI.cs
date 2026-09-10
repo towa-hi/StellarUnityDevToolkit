@@ -49,18 +49,6 @@ public class GameUI : MonoBehaviour
         }
     }
 
-    void HandleGameOver()
-    {
-        Debug.Log($"GameUI: HandleGameOver. gameOverPopup={(gameOverPopup != null ? gameOverPopup.name : "null")}.", this);
-        if (gameOverPopup != null)
-        {
-            gameOverPopup.Show();
-            return;
-        }
-
-        Debug.LogWarning("GameUI: HandleGameOver but gameOverPopup is null.", this);
-    }
-
     void HandleSceneCleared()
     {
         HideGameOverPopup();
@@ -119,8 +107,6 @@ public class GameUI : MonoBehaviour
         gameController.ScoreChanged += HandleScoreChanged;
         gameController.StreakChanged -= HandleStreakChanged;
         gameController.StreakChanged += HandleStreakChanged;
-        gameController.GameOver -= HandleGameOver;
-        gameController.GameOver += HandleGameOver;
         gameController.SceneCleared -= HandleSceneCleared;
         gameController.SceneCleared += HandleSceneCleared;
     }
@@ -134,7 +120,6 @@ public class GameUI : MonoBehaviour
 
         gameController.ScoreChanged -= HandleScoreChanged;
         gameController.StreakChanged -= HandleStreakChanged;
-        gameController.GameOver -= HandleGameOver;
         gameController.SceneCleared -= HandleSceneCleared;
     }
 

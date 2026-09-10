@@ -6,11 +6,13 @@ use soroban_sdk::{testutils::Address as _, token, vec, Address, Bytes, Env, Map,
 // Minimal NFT contract used to exercise the marketplace cross-contract calls.
 // Matches the `Nft` client interface (`transfer`, `owner_of`) plus a `mint`.
 mod mock_nft {
-    use soroban_sdk::{contract, contractimpl, contracttype, Address, Env};
+    use soroban_sdk::{contract, contractimpl, contracttype, Address, Env, Vec};
 
     #[contracttype]
     pub enum NftKey {
         Owner(u32),
+        Supply,
+        Mints(Address),
     }
 
     #[contract]
@@ -18,8 +20,33 @@ mod mock_nft {
 
     #[contractimpl]
     impl MockNft {
-        pub fn mint(e: &Env, to: Address, token_id: u32) {
+        pub fn mint(e: &Env, to: Address, points: u32) -> u32 {
+            let supply: u32 = e.storage().instance().get(&NftKey::Supply).unwrap_or(0);
+            let token_id = if points == 50 || points == 100 || points == 500 {
+                supply * 1000 + points
+            } else {
+                points
+            };
             e.storage().persistent().set(&NftKey::Owner(token_id), &to);
+            e.storage().instance().set(&NftKey::Supply, &(supply + 1));
+
+            let mut mints: Vec<u32> = e
+                .storage()
+                .persistent()
+                .get(&NftKey::Mints(to.clone()))
+                .unwrap_or_else(|| Vec::new(e));
+            mints.push_back(points);
+            e.storage()
+                .persistent()
+                .set(&NftKey::Mints(to.clone()), &mints);
+            token_id
+        }
+
+        pub fn minted_points(e: &Env, owner: Address) -> Vec<u32> {
+            e.storage()
+                .persistent()
+                .get(&NftKey::Mints(owner))
+                .unwrap_or_else(|| Vec::new(e))
         }
 
         pub fn owner_of(e: &Env, token_id: u32) -> Address {
@@ -238,6 +265,30 @@ fn setup_game_log<'a>() -> (Env, ContractClient<'a>, Address) {
     let client = ContractClient::new(&env, &contract_id);
     let player = Address::generate(&env);
     (env, client, player)
+}
+
+fn setup_game_log_with_nft<'a>() -> (
+    Env,
+    ContractClient<'a>,
+    Address,
+    mock_nft::MockNftClient<'a>,
+) {
+    let (env, client, player) = setup_game_log();
+    let nft_id = env.register(mock_nft::MockNft, ());
+    let nft = mock_nft::MockNftClient::new(&env, &nft_id);
+    let setter = Address::generate(&env);
+    client.set_score_nft(&setter, &nft_id);
+    (env, client, player, nft)
+}
+
+fn greedy_log_in_score_range(env: &Env, min_score: u32, max_exclusive: u32) -> GameLog {
+    for seed in 1u64..256 {
+        let log = crate::game::greedy_game_log(env, seed);
+        if log.final_score >= min_score && log.final_score < max_exclusive {
+            return log;
+        }
+    }
+    panic!("no greedy seed produced a score in [{min_score}, {max_exclusive})");
 }
 
 fn empty_packed_moves(env: &Env) -> PackedMoves {
@@ -555,6 +606,80 @@ fn test_register_game_log_persists_packed_moves() {
         crate::game::validate_game_log(&stored),
         Ok(stored.final_score)
     );
+}
+
+#[test]
+fn test_set_score_nft_is_write_once() {
+    let (env, client, _) = setup_game_log();
+    let nft_id = env.register(mock_nft::MockNft, ());
+    let setter = Address::generate(&env);
+    client.set_score_nft(&setter, &nft_id);
+    let result = client.try_set_score_nft(&setter, &nft_id);
+    assert_eq!(result, Err(Ok(Error::AlreadyInitialized)));
+}
+
+#[test]
+fn test_register_game_log_skips_mint_below_50() {
+    let (env, client, player, nft) = setup_game_log_with_nft();
+    let log = unfinished_game_log(&env, 0, 99);
+    client.register_game_log(&player, &log);
+    assert_eq!(nft.minted_points(&player).len(), 0);
+}
+
+#[test]
+fn test_register_game_log_mints_50_point_asset() {
+    let (env, client, player, nft) = setup_game_log_with_nft();
+    let log = greedy_log_in_score_range(&env, 50, 100);
+    client.register_game_log(&player, &log);
+    assert_eq!(nft.minted_points(&player), vec![&env, 50u32]);
+    assert_eq!(nft.owner_of(&50u32), player);
+}
+
+#[test]
+fn test_register_game_log_mints_100_point_asset_for_mid_score() {
+    let (env, client, player, nft) = setup_game_log_with_nft();
+    let log = greedy_log_in_score_range(&env, 100, 500);
+    client.register_game_log(&player, &log);
+    assert_eq!(nft.minted_points(&player), vec![&env, 100u32]);
+}
+
+#[test]
+fn test_highest_score_asset_picks_highest_tier_only() {
+    assert_eq!(highest_score_asset(0), None);
+    assert_eq!(highest_score_asset(49), None);
+    assert_eq!(highest_score_asset(50), Some(50));
+    assert_eq!(highest_score_asset(99), Some(50));
+    assert_eq!(highest_score_asset(100), Some(100));
+    assert_eq!(highest_score_asset(499), Some(100));
+    assert_eq!(highest_score_asset(500), Some(500));
+}
+
+#[test]
+fn test_register_game_log_mints_again_on_second_qualifying_game() {
+    let (env, client, player, nft) = setup_game_log_with_nft();
+    let first = greedy_log_in_score_range(&env, 50, 100);
+    let mut second = greedy_log_in_score_range(&env, 50, 100);
+    if second.seed == first.seed {
+        second = greedy_game_log_excluding(&env, 50, 100, first.seed);
+    }
+    client.register_game_log(&player, &first);
+    client.register_game_log(&player, &second);
+    assert_eq!(nft.minted_points(&player), vec![&env, 50u32, 50u32]);
+    assert_eq!(nft.owner_of(&50u32), player);
+    assert_eq!(nft.owner_of(&1050u32), player);
+}
+
+fn greedy_game_log_excluding(env: &Env, min_score: u32, max_exclusive: u32, exclude_seed: u64) -> GameLog {
+    for seed in 1u64..256 {
+        if seed == exclude_seed {
+            continue;
+        }
+        let log = crate::game::greedy_game_log(env, seed);
+        if log.final_score >= min_score && log.final_score < max_exclusive {
+            return log;
+        }
+    }
+    panic!("no second greedy seed produced a score in [{min_score}, {max_exclusive})");
 }
 
 #[test]

@@ -18,6 +18,7 @@ public class TestWindow : MonoBehaviour
     public Button getSep50BalanceButton;
     public TextMeshProUGUI sep50BalanceResultText;
     public Button mintSep50AssetButton;
+    public TMP_InputField sep50MintPointsInputField;
     public TextMeshProUGUI sep50MintedIdResultText;
     public Button getSep50OwnerMapButton;
     // Start is called once before the first execution of Update after the MonoBehaviour is created
@@ -123,7 +124,12 @@ public class TestWindow : MonoBehaviour
 
         string assetContractAddress = sep50AssetContractAddressInputField != null ? sep50AssetContractAddressInputField.text : null;
         string ownerAddressOverride = sep50OwnerAddressInputField != null ? sep50OwnerAddressInputField.text : null;
-        Result<SorobanInvocationMeta> result = await GameManager.Instance.MintSEP50AssetAsync(assetContractAddress, ownerAddressOverride);
+        uint points = 50;
+        if (sep50MintPointsInputField != null && uint.TryParse(sep50MintPointsInputField.text, out uint parsedPoints))
+        {
+            points = parsedPoints;
+        }
+        Result<SorobanInvocationMeta> result = await GameManager.Instance.MintSEP50AssetAsync(assetContractAddress, ownerAddressOverride, points);
 
         if (sep50MintedIdResultText != null)
         {

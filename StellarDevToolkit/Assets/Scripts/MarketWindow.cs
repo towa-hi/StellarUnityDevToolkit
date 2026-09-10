@@ -84,7 +84,7 @@ public class MarketWindow : MonoBehaviour
 
             AssetCard assetCard = Instantiate(assetCardPrefab, root.transform).GetComponent<AssetCard>();
             assetCard.tokenId = asset.Key;
-            assetCard.SetName("Token ID: " + asset.Key);
+            assetCard.SetName(AssetCard.ScoreAssetDisplayName(asset.Key));
             if (assetCard.sendButton != null)
             {
                 // The card's name label lives on the send button, so disable the Button
