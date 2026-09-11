@@ -1,0 +1,2206 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Stellar Dev Toolkit &mdash; Documentation</title>
+<meta name="description" content="Technical documentation for the Stellar Dev Toolkit, a Unity toolkit for Stellar and Soroban: install, contracts, signing, WebGL, RPC, contract invocation, NFTs and gameplay integration.">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<a class="skip" href="#content">Skip to content</a>
+
+<div class="layout">
+
+<nav id="toc">
+  <p class="toc-title">Stellar Dev Toolkit</p>
+  <p class="toc-sub">Technical documentation</p>
+  <ol>
+    <li><a href="#ch1">Components</a>
+      <ol>
+        <li><a href="#ch1-model">Three-layer model</a></li>
+        <li><a href="#ch1-layout">Package layout</a></li>
+      </ol>
+    </li>
+    <li><a href="#ch2">Installation</a>
+      <ol>
+        <li><a href="#ch2-install">Adding the packages</a></li>
+        <li><a href="#ch2-verify">Verifying the install</a></li>
+        <li><a href="#ch2-linkxml">link.xml</a></li>
+      </ol>
+    </li>
+    <li><a href="#ch3">Contracts</a>
+      <ol>
+        <li><a href="#ch3-build">Init, build, deploy</a></li>
+        <li><a href="#ch3-scaffold">Echo scaffolding</a></li>
+        <li><a href="#ch3-matching">Type matching</a></li>
+      </ol>
+    </li>
+    <li><a href="#ch4">Signing and WebGL</a>
+      <ol>
+        <li><a href="#ch4-paths">Signing methods</a></li>
+        <li><a href="#ch4-walletmanager">WalletManager</a></li>
+        <li><a href="#ch4-bridge">The jslib bridge</a></li>
+        <li><a href="#ch4-template">WebGL template</a></li>
+        <li><a href="#ch4-settings">Player settings</a></li>
+        <li><a href="#ch4-testing">Testing</a></li>
+        <li><a href="#ch4-checklist">Checklist</a></li>
+      </ol>
+    </li>
+    <li><a href="#ch5">RPC calls</a>
+      <ol>
+        <li><a href="#ch5-transport">Transport</a></li>
+        <li><a href="#ch5-methods">Methods</a></li>
+        <li><a href="#ch5-ledgerkeys">Ledger keys</a></li>
+        <li><a href="#ch5-lazy">Lazy XDR decoding</a></li>
+        <li><a href="#ch5-errors">Error handling</a></li>
+      </ol>
+    </li>
+    <li><a href="#ch6">Simulation and invocation</a>
+      <ol>
+        <li><a href="#ch6-entry">Entry points</a></li>
+        <li><a href="#ch6-pipeline">Invocation pipeline</a></li>
+        <li><a href="#ch6-results">Return values and fees</a></li>
+        <li><a href="#ch6-scutility">SCVal conversion</a></li>
+        <li><a href="#ch6-gotchas">Gotchas</a></li>
+      </ol>
+    </li>
+    <li><a href="#ch7">NFTs</a>
+      <ol>
+        <li><a href="#ch7-contract">The contract</a></li>
+        <li><a href="#ch7-tokenid">Token-id encoding</a></li>
+        <li><a href="#ch7-helpers">SEP-50 helpers</a></li>
+        <li><a href="#ch7-owned">Finding owned tokens</a></li>
+        <li><a href="#ch7-display">Display and metadata</a></li>
+      </ol>
+    </li>
+    <li><a href="#ch8">Gameplay integration</a>
+      <ol>
+        <li><a href="#ch8-determinism">Determinism</a></li>
+        <li><a href="#ch8-calls">Contract calls</a></li>
+        <li><a href="#ch8-cross">Cross-contract minting</a></li>
+        <li><a href="#ch8-market">Marketplace</a></li>
+        <li><a href="#ch8-production">Production checklist</a></li>
+      </ol>
+    </li>
+  </ol>
+  <ul class="toc-extra">
+    <li><a href="#appendix">Appendix: quick reference</a></li>
+  </ul>
+</nav>
+
+<main id="content">
+
+<header class="page-header">
+  <h1>Stellar Dev Toolkit</h1>
+  <p class="tagline">Technical documentation for the Stellar Dev Toolkit, a Unity toolkit for Stellar and Soroban by Scrying Stone.</p>
+  <div class="badges">
+    <span class="badge">Unity 6000.0.28f1</span>
+    <span class="badge">stellar-sdk 0.1.0</span>
+    <span class="badge">stellar-wallet 0.1.0</span>
+    <span class="badge">soroban-sdk 22 / 25</span>
+    <span class="badge">Testnet</span>
+  </div>
+</header>
+
+<p>This documentation covers building an on-chain Unity game with the toolkit, from an empty
+project through to gameplay that writes to a Soroban contract. It assumes working knowledge of
+Unity and C#, and passing familiarity with Stellar concepts: accounts, transactions, and
+contracts.</p>
+
+<p>Chapter 3 is intentionally brief. Contract authoring is covered properly by the
+official Stellar documentation and is not repeated here.</p>
+
+<p>Code blocks marked <em>source</em> are copied from this repository. Blocks marked
+<em>example</em> are illustrative and are not present in the repository.</p>
+
+
+<!-- ==================== CHAPTER 1 ==================== -->
+
+<h2 id="ch1"><span class="ch-num">Chapter 1</span>Components</h2>
+
+<p>The Stellar Dev Toolkit is a managed C# layer over the Soroban JSON-RPC API, distributed as two
+Unity packages. It allows a Unity game to interact with Stellar smart contracts: building
+transactions, signing them, encoding them to XDR, posting them to a Soroban node, and decoding the
+results.</p>
+
+<p>The stack is <code>UnityWebRequest</code>, <code>Newtonsoft.Json</code> and hand-written XDR
+readers. No native plugin is required outside of WebGL wallet signing, which is why the toolkit
+survives IL2CPP stripping and runs in a browser.</p>
+
+<p>Responsibilities are split between the two packages:</p>
+
+<ul>
+<li><strong>com.scryingstone.stellar-sdk</strong>: Transaction building, XDR, Soroban RPC, and
+<code>SCVal</code> serialization. Assembly <code>StellarSDK.Runtime</code>, namespace
+<code>StellarSDK</code>.</li>
+<li><strong>com.scryingstone.stellar-wallet</strong>: A signing method &mdash; Freighter browser
+wallet signing for WebGL builds. Assembly <code>StellarSDK.Wallet.Runtime</code>, namespace
+<code>StellarWallet</code>. It attaches to the SDK through a single signing delegate, and can be
+replaced with a custom signer &mdash; a hardware wallet, a passkey, a custodial service &mdash;
+without touching the SDK.</li>
+</ul>
+
+<p>Both packages require Unity <code>6000.0</code> or higher. The only dependency is
+Newtonsoft.Json.</p>
+
+<h3 id="ch1-model">Three-layer model</h3>
+
+<figure class="diagram">
+<svg viewBox="0 0 720 348" role="img" aria-label="Diagram: gameplay code calls StellarClient which calls a Soroban RPC node. WalletManager calls a jslib bridge which calls the Freighter extension. WalletManager attaches to StellarClient through the unityWalletSigner delegate.">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#6d7784"></path>
+    </marker>
+  </defs>
+
+  <rect class="svg-box" x="40" y="24" width="280" height="58" rx="5"></rect>
+  <text class="svg-label" x="180" y="48">Gameplay code</text>
+  <text class="svg-sub" x="180" y="66">MonoBehaviours, UI</text>
+
+  <rect class="svg-box-alt" x="400" y="24" width="280" height="58" rx="5"></rect>
+  <text class="svg-label" x="540" y="48">WalletManager</text>
+  <text class="svg-sub" x="540" y="66">StellarWallet, static</text>
+
+  <rect class="svg-box" x="40" y="145" width="280" height="58" rx="5"></rect>
+  <text class="svg-label" x="180" y="169">StellarClient</text>
+  <text class="svg-sub" x="180" y="187">static, no instance state</text>
+
+  <rect class="svg-box-alt" x="400" y="145" width="280" height="58" rx="5"></rect>
+  <text class="svg-label" x="540" y="169">StellarClient.jslib</text>
+  <text class="svg-sub" x="540" y="187">WebGL builds only</text>
+
+  <rect class="svg-box" x="40" y="266" width="280" height="58" rx="5"></rect>
+  <text class="svg-label" x="180" y="290">Soroban RPC node</text>
+  <text class="svg-sub" x="180" y="308">JSON-RPC over HTTPS</text>
+
+  <rect class="svg-box-alt" x="400" y="266" width="280" height="58" rx="5"></rect>
+  <text class="svg-label" x="540" y="290">Freighter extension</text>
+  <text class="svg-sub" x="540" y="308">holds the secret key</text>
+
+  <path class="svg-edge" d="M 180 82 L 180 143" marker-end="url(#arrow)"></path>
+  <path class="svg-edge" d="M 180 203 L 180 264" marker-end="url(#arrow)"></path>
+  <path class="svg-edge" d="M 540 82 L 540 143" marker-end="url(#arrow)"></path>
+  <path class="svg-edge" d="M 540 203 L 540 264" marker-end="url(#arrow)"></path>
+  <path class="svg-edge" d="M 400 53 L 362 53 L 362 174 L 322 174" marker-end="url(#arrow)"></path>
+  <text class="svg-edge-label" x="370" y="118" text-anchor="start">unityWalletSigner</text>
+</svg>
+<figcaption>The left column is the whole stack on desktop and in the Editor. The right column
+exists only in a WebGL player build.</figcaption>
+</figure>
+
+<h3 id="ch1-layout">Package layout</h3>
+
+<div class="table-wrap">
+<table>
+<thead><tr><th>Folder</th><th>Contents</th></tr></thead>
+<tbody>
+<tr><td><code>Runtime/Core</code></td><td class="wrap">Five hand-written files: <code>StellarClient</code>, <code>NetworkContext</code>, <code>Result</code>, <code>StellarClientTask</code>, Soroban meta types. The entire public surface.</td></tr>
+<tr><td><code>Runtime/Serialization</code></td><td class="wrap"><code>SCUtility</code>, <code>IScvMapCompatable</code>. C# to <code>SCVal</code> conversion.</td></tr>
+<tr><td><code>Runtime/Utilities</code></td><td class="wrap"><code>StrKey</code>, <code>Base32Encoding</code>, <code>Util.Hash</code>, <code>AsyncDelay</code>.</td></tr>
+<tr><td><code>Runtime/RPC</code></td><td class="wrap">17 generated JSON-RPC DTOs, plus 10 hand-written partials that decode base64 XDR fields on demand.</td></tr>
+<tr><td><code>Runtime/Stellar</code></td><td class="wrap">399 generated XDR types, plus 8 hand-written partials including <code>Transaction</code>, <code>Network</code> and <code>MuxedAccount</code>.</td></tr>
+<tr><td><code>Runtime/Plugins</code></td><td class="wrap">Precompiled DLL references for BIP32/BIP39 derivation and data annotations. See <a href="#ch2-install">Adding the packages</a>.</td></tr>
+<tr><td><code>Samples/Demo</code></td><td class="wrap">The importable RPC Demo: one scene, one script, read-only endpoints.</td></tr>
+</tbody>
+</table>
+</div>
+
+<p>XDR types come from <code>XdrGenerator v1.0</code>; RPC DTOs come from NJsonSchema. Neither
+generator ships with the package.</p>
+
+<!-- ==================== CHAPTER 2 ==================== -->
+
+<h2 id="ch2"><span class="ch-num">Chapter 2</span>Installation</h2>
+
+<p>Target state for this chapter: a new Unity project with the packages installed, compiling, and
+ready to build.</p>
+
+<ul>
+<li><strong>Unity</strong>: <code>6000.0</code> minimum, declared in both
+<code>package.json</code> files. The sample project is authored in <code>6000.0.28f1</code>.</li>
+<li><strong>Render pipeline</strong>: Irrelevant. The sample uses URP; nothing in the toolkit
+draws anything.</li>
+<li><strong>Dependencies</strong>: Newtonsoft.Json resolves transitively through the Package
+Manager. Do not add it manually.</li>
+</ul>
+
+<h3 id="ch2-install">Adding the packages</h3>
+
+<p>Install through the Package Manager with a git URL. Both packages live in one repository, so a
+<code>?path=</code> query selects which one to install.</p>
+
+<p>Window &rarr; Package Manager &rarr; <strong>+</strong> &rarr; Add package from git URL, then
+paste one of these. Add them one at a time.</p>
+
+<figure class="code">
+<figcaption><span class="kind example">example</span>Package Manager git URLs</figcaption>
+<pre><code>https://github.com/Scrying-Stone/stellar-unity-packages.git?path=/com.scryingstone.stellar-sdk
+https://github.com/Scrying-Stone/stellar-unity-packages.git?path=/com.scryingstone.stellar-wallet</code></pre>
+</figure>
+
+<h4>Unity Asset Store</h4>
+
+<p>The SDK is also published free on the Asset Store as
+<a href="https://assetstore.unity.com/packages/tools/integration/stellar-rpc-and-xdr-serialization-tools-388642">Stellar
+RPC and XDR Serialization Tools</a>. Add it to the account, then install through Package Manager
+&rarr; My Assets. This route needs no git executable and gives a fixed, reviewed version.</p>
+
+<p>The Asset Store carries the SDK only. A WebGL project that needs Freighter signing still takes
+the git URL for <code>com.scryingstone.stellar-wallet</code>.</p>
+
+<div class="callout gotcha">
+<span class="label">Gotcha</span>
+<p><code>StellarSDK.Runtime.asmdef</code> sets <code>overrideReferences: true</code> and names four
+precompiled references: <code>Newtonsoft.Json.dll</code>, <code>dotnetstandard-bip32.dll</code>,
+<code>dotnetstandard-bip39.dll</code> and <code>System.ComponentModel.Annotations.dll</code>. The
+source additionally references <code>Chaos.NaCl</code> for Ed25519. In this checkout
+<code>Runtime/Plugins/</code> contains only <code>.meta</code> files &mdash; the DLLs themselves are
+absent. They must be restored into <code>Runtime/Plugins/</code> for the assembly to compile.</p>
+</div>
+
+<h3 id="ch2-verify">Verifying the install</h3>
+
+<p>The SDK ships a runnable sample. Select the package in the Package Manager, open the
+<strong>Samples</strong> tab and import <strong>RPC Demo</strong>.</p>
+
+<p>It is a scene and one script that exercise the read-only endpoints &mdash;
+<code>getHealth</code>, <code>getLatestLedger</code>, <code>getNetwork</code>,
+<code>getVersionInfo</code>, <code>getFeeStats</code>, <code>getLedgers</code>,
+<code>getTransactions</code> and <code>getEvents</code> &mdash; against testnet, reporting pass or
+fail on screen and in the console. No account, keys or contract are needed, so it confirms the
+install and the network path in one step.</p>
+
+<h3 id="ch2-linkxml">link.xml</h3>
+
+<p>Newtonsoft.Json reaches the RPC DTOs by reflection, which IL2CPP's managed stripping cannot
+see. Without preservation rules a WebGL build emits malformed JSON or throws inside the
+serializer, while the Editor works fine because Mono does not strip.</p>
+
+<p>The SDK package ships its own <code>link.xml</code>, which covers the SDK. A project also using
+the wallet package needs its own, because the wallet DTOs live in a different assembly:</p>
+
+<figure class="code">
+<figcaption><span class="kind">source</span>StellarDevToolkit/Assets/link.xml, lines 9&ndash;17</figcaption>
+<pre><code>&lt;assembly fullname="Newtonsoft.Json" preserve="all"/&gt;
+
+&lt;assembly fullname="StellarSDK.Runtime"&gt;
+  &lt;type fullname="Stellar.RPC.*" preserve="all"/&gt;
+&lt;/assembly&gt;
+&lt;assembly fullname="StellarSDK.Wallet.Runtime"&gt;
+  &lt;type fullname="StellarWallet.NetworkDetails" preserve="all"/&gt;
+  &lt;type fullname="StellarWallet.JSResponse" preserve="all"/&gt;
+&lt;/assembly&gt;</code></pre>
+</figure>
+
+<p>Add this before the first WebGL build, not after the first stripping bug. Any custom type
+deserialized from a contract result needs the same treatment, or a
+<code>[UnityEngine.Scripting.Preserve]</code> attribute.</p>
+
+<!-- ==================== CHAPTER 3 ==================== -->
+
+<h2 id="ch3"><span class="ch-num">Chapter 3</span>Contracts</h2>
+
+<p>Contract authoring is documented properly at
+<a href="https://developers.stellar.org/docs/build/smart-contracts">developers.stellar.org</a>,
+including toolchain installation, the Rust environment, and the <code>stellar</code> CLI. This
+chapter covers only what is needed to connect a contract to a Unity project.</p>
+
+<h3 id="ch3-build">Init, build, deploy</h3>
+
+<p><code>stellar contract init &lt;dir&gt;</code> produces a Cargo workspace with contracts under
+<code>contracts/*</code>. Both workspaces in this repository follow that layout:</p>
+
+<ul>
+<li><code>Contracts/unity-sample</code>: the game contract. <code>soroban-sdk 22.0.0</code>, no other
+dependencies.</li>
+<li><code>Contracts/nft</code>: the NFT contract. <code>soroban-sdk 25</code> plus OpenZeppelin
+Stellar crates pinned at <code>=0.7.1</code>.</li>
+</ul>
+
+<p>Each crate declares <code>crate-type = ["lib", "cdylib"]</code> &mdash; <code>cdylib</code> for the
+deployable wasm, <code>lib</code> so tests and other crates can link it.</p>
+
+<figure class="code">
+<figcaption><span class="kind">source</span>Contracts/nft/contracts/hello-world/Makefile</figcaption>
+<pre><code>default: build
+
+all: test
+
+test: build
+	cargo test
+
+build:
+	stellar contract build
+	@ls -l target/wasm32v1-none/release/*.wasm
+
+fmt:
+	cargo fmt --all
+
+clean:
+	cargo clean</code></pre>
+</figure>
+
+<div class="callout gotcha">
+<span class="label">Gotcha</span>
+<p>Build output lands in <code>target/wasm32v1-none/release/</code>, not
+<code>target/wasm32-unknown-unknown/release/</code>. Recent <code>stellar contract build</code>
+versions target <code>wasm32v1-none</code>. Deploy scripts copied from older tutorials will fail to
+find the artifact.</p>
+</div>
+
+<p>Deploy with <code>stellar contract deploy</code>, then paste the resulting <code>C...</code>
+address into <code>NetworkContext.contractAddress</code>. Both workspaces gitignore
+<code>target</code>, <code>.soroban</code> and <code>.stellar</code>, so no wasm and no deployment
+state is committed. The contract address is the only handoff artifact between the Rust and Unity
+sides.</p>
+
+<p>The smallest contract that proves the round trip works:</p>
+
+<figure class="code">
+<figcaption><span class="kind">source</span>Contracts/unity-sample/contracts/hello-world/src/lib.rs, lines 147&ndash;149</figcaption>
+<pre><code>pub fn hello(e: &amp;Env, to: String) -&gt; Vec&lt;String&gt; {
+    vec![&amp;e, String::from_str(&amp;e, "Hello"), to]
+}</code></pre>
+</figure>
+
+<h3 id="ch3-scaffold">Echo scaffolding</h3>
+
+<p>The sample contract carries roughly 30 trivial functions that exist purely to validate the C#
+side of serialization:</p>
+
+<ul>
+<li>Primitives: <code>echo_u32</code>, <code>echo_i32</code>, <code>echo_u64</code>,
+<code>echo_bool</code>, <code>echo_string</code>, <code>echo_bytes</code></li>
+<li>Arithmetic: <code>add_u32</code>, <code>add_i32</code>, <code>negate_i32</code></li>
+<li>Collections: <code>echo_vec</code>, <code>sum_vec</code>, <code>make_vec</code>,
+<code>echo_map</code>, <code>map_get</code>, <code>make_map</code></li>
+<li>Structs: <code>echo_inventory</code>, <code>make_inventory</code></li>
+<li>Edge cases: <code>echo_u32_zero</code>, <code>echo_empty_vec</code>,
+<code>echo_empty_string</code>, <code>echo_max_u32</code>, <code>echo_min_i32</code>,
+<code>echo_max_u64</code></li>
+</ul>
+
+<p>This pattern is worth copying. <code>SCVal</code> conversion errors and genuine contract logic
+errors present identically from Unity &mdash; both arrive as a failed simulation. Having a set of
+functions whose correct behaviour is obvious separates the two failure modes before gameplay logic
+is in the way. <code>Assets/Scripts/RpcTests.cs</code> drives all of them.</p>
+
+<h3 id="ch3-matching">Type matching</h3>
+
+<p>The SDK has no binding generator, so nothing verifies that the Rust and C# sides agree. Two
+places where they must:</p>
+
+<ul>
+<li><strong>Function names</strong> are passed as strings from C#. A typo is a runtime simulation
+failure, not a compile error.</li>
+<li><strong>Struct field names</strong> must match exactly. <code>SCUtility</code> maps a
+<code>#[contracttype]</code> struct to an <code>SCVal</code> map keyed by field name, and matches
+back onto public C# fields by name. Renaming a Rust field silently breaks decoding.</li>
+</ul>
+
+<div class="callout note">
+<span class="label">Note</span>
+<p>The two workspaces here pin different SDK majors, <code>22.0.0</code> and <code>25</code>. That
+is fine, because they never link against each other &mdash; cross-contract calls go through a
+declared trait rather than a crate dependency. See
+<a href="#ch8-cross">Cross-contract minting</a>.</p>
+</div>
+
+<!-- ==================== CHAPTER 4 ==================== -->
+
+<h2 id="ch4"><span class="ch-num">Chapter 4</span>Signing and WebGL</h2>
+
+<p>Signing is the only part of the toolkit that is platform-dependent. Local key signing works
+everywhere; browser wallet signing works only in a WebGL player build, and requires a WebGL
+template that the wallet package does not ship.</p>
+
+<h3 id="ch4-paths">Signing methods</h3>
+
+<p><code>NetworkContext.SigningMethod</code> has two values, dispatched in
+<code>StellarClient.SignAndEncodeTransaction</code>.</p>
+
+<figure class="code">
+<figcaption><span class="kind">source</span>StellarDevToolkit/Packages/com.scryingstone.stellar-sdk/Runtime/Core/StellarClient.cs, lines 645&ndash;662</figcaption>
+<pre><code>if (context.signingMethod == NetworkContext.SigningMethod.UnityWallet)
+{
+    if (context.unityWalletSigner == null)
+    {
+        return Result&lt;string&gt;.Err(StatusCode.WALLET_NOT_AVAILABLE, "Unity wallet signing is selected, but no wallet signer is registered.");
+    }
+
+    Result&lt;string&gt; signTransactionRes = await context.unityWalletSigner(EncodeTransaction(transaction), Network.Current.NetworkPassphrase);
+    if (signTransactionRes.IsError)
+    {
+        return Result&lt;string&gt;.Err(signTransactionRes);
+    }
+    return Result&lt;string&gt;.Ok(signTransactionRes.Value);
+}
+
+if (context.signingMethod == NetworkContext.SigningMethod.PrivateKey)
+{
+    DecoratedSignature signature = transaction.Sign(context.userAccount);</code></pre>
+</figure>
+
+<div class="table-wrap">
+<table>
+<thead><tr><th></th><th><code>PrivateKey</code></th><th><code>UnityWallet</code></th></tr></thead>
+<tbody>
+<tr><td>Mechanism</td><td>Local Ed25519 via <code>transaction.Sign</code></td><td>Delegate call out to <code>unityWalletSigner</code></td></tr>
+<tr><td>Platforms</td><td>All, including the Editor</td><td>WebGL player builds only</td></tr>
+<tr><td>Key custody</td><td>Secret seed held in memory</td><td>Key never leaves the extension</td></tr>
+<tr><td>Use for</td><td>Development, automated tests</td><td>Shipping builds</td></tr>
+</tbody>
+</table>
+</div>
+
+<p>The delegate signature is
+<code>Func&lt;string, string, Task&lt;Result&lt;string&gt;&gt;&gt;</code>, taking an unsigned
+base64 transaction envelope and a network passphrase, and returning a signed envelope. Anything
+matching that shape is a valid signer.</p>
+
+<p>The sample's adapter is the whole integration between the two packages: connect, assign the
+delegate, store the public-key-only account, and adopt the wallet's RPC URL.</p>
+
+<figure class="code">
+<figcaption><span class="kind">source</span>StellarDevToolkit/Assets/Scripts/GameManager.cs, lines 242&ndash;257</figcaption>
+<pre><code>WalletResult&lt;WalletManager.WalletConnection&gt; result = await WalletManager.ConnectWallet(context.isTestnet);
+if (result.IsError)
+{
+    Debug.LogError($"ConnectWallet: error: {result.Message}");
+    return;
+}
+
+context.signingMethod = NetworkContext.SigningMethod.UnityWallet;
+context.unityWalletSigner = SignWithUnityWallet;
+context.userAccount = MuxedAccount.FromAccountId(result.Value.address);
+if (!string.IsNullOrWhiteSpace(result.Value.networkDetails?.sorobanRpcUrl))
+{
+    context.serverUri = result.Value.networkDetails.sorobanRpcUrl;
+}
+
+SetNetworkContext(context);</code></pre>
+</figure>
+
+<p>The delegate itself is a status-code translation between the two result types:</p>
+
+<figure class="code">
+<figcaption><span class="kind">source</span>StellarDevToolkit/Assets/Scripts/GameManager.cs, lines 286&ndash;295</figcaption>
+<pre><code>public static async Task&lt;Result&lt;string&gt;&gt; SignWithUnityWallet(string unsignedEnvelope, string networkPassphrase)
+{
+    WalletResult&lt;string&gt; result = await WalletManager.SignTransaction(unsignedEnvelope, networkPassphrase);
+    if (result.IsOk)
+    {
+        return Result&lt;string&gt;.Ok(result.Value);
+    }
+
+    return Result&lt;string&gt;.Err(MapWalletStatusCode(result.Code), result.Message);
+}</code></pre>
+</figure>
+
+<div class="callout gotcha">
+<span class="label">Gotcha</span>
+<p>With Freighter the account is built from <code>MuxedAccount.FromAccountId</code>, so it carries a
+public key only. <code>CanSign()</code> returns <code>false</code> and <code>SecretSeed</code> is
+<code>null</code>. Any UI that reads the seed must branch on the signing method.
+<code>NetworkContextWindow</code> does this by disabling and clearing the private key field when
+<code>walletConnected</code> is true.</p>
+</div>
+
+<h3 id="ch4-walletmanager">WalletManager</h3>
+
+<p><code>StellarWallet.WalletManager</code> is a static class &mdash; no MonoBehaviour, no
+GameObject, no prefab to place in a scene.</p>
+
+<div class="table-wrap">
+<table>
+<thead><tr><th>Member</th><th>Purpose</th></tr></thead>
+<tbody>
+<tr><td><code>ConnectWallet(bool isTestnet)</code></td><td class="wrap">Detect the wallet, request access, fetch network details. Returns <code>WalletResult&lt;WalletConnection&gt;</code> carrying <code>address</code> and <code>networkDetails</code>.</td></tr>
+<tr><td><code>SignTransaction(envelope, passphrase)</code></td><td class="wrap">Request a signature. Returns the signed base64 envelope.</td></tr>
+<tr><td><code>CanFindWalletAsync()</code></td><td class="wrap">Availability probe. Use it to decide whether to show a wallet button at all.</td></tr>
+<tr><td><code>DisconnectWallet()</code></td><td class="wrap">Clears <code>address</code> and <code>networkDetails</code>. Local only; the extension is untouched.</td></tr>
+<tr><td><code>address</code>, <code>networkDetails</code></td><td class="wrap">Last connection state.</td></tr>
+<tr><td><code>webGL</code></td><td class="wrap"><code>true</code> when compiled for WebGL, including in the Editor.</td></tr>
+<tr><td><code>IsWalletBusy</code>, <code>OnWalletBusyChanged</code></td><td class="wrap">True during connect and sign. Use it to block input while the extension popup is open.</td></tr>
+</tbody>
+</table>
+</div>
+
+<p><code>NetworkDetails</code> returns <code>network</code>, <code>networkUrl</code>,
+<code>networkPassphrase</code> and <code>sorobanRpcUrl</code>. Adopting
+<code>sorobanRpcUrl</code> keeps the game pointed at whatever node the user's wallet is
+configured for.</p>
+
+<p>Failures come back as <code>WalletStatusCode</code>: <code>Success</code>,
+<code>WalletNotAvailable</code>, <code>WalletAddressMissing</code>,
+<code>WalletNetworkDetailsError</code>, <code>WalletParsingError</code>,
+<code>WalletSigningError</code>, <code>WalletSigningCancelled</code>.</p>
+
+<div class="callout note">
+<span class="label">Note</span>
+<p><code>WalletSigningCancelled</code> is a normal outcome, not an error. Users dismiss signing
+popups routinely. It arrives from the jslib layer as code <code>-9</code> and propagates to the SDK
+as <code>WALLET_SIGNING_CANCELLED</code>, which <code>CallContractFunction</code> forwards
+untouched. Treat it as "return to the previous screen", not as a failure to report.</p>
+</div>
+
+<h3 id="ch4-bridge">The jslib bridge</h3>
+
+<p>The bridge uses <strong>function-pointer callbacks, not <code>SendMessage</code></strong>. Most
+Unity/JavaScript integration guides teach <code>SendMessage</code>, which requires a GameObject
+name and a method name as strings and cannot return a value. This package does not use it.</p>
+
+<p>C# declares four imports plus a callback delegate:</p>
+
+<figure class="code">
+<figcaption><span class="kind">source</span>StellarDevToolkit/Packages/com.scryingstone.stellar-wallet/Runtime/WalletManager.cs, lines 70&ndash;82</figcaption>
+<pre><code>delegate void WalletResponseCallback(int requestId, int code, IntPtr dataPtr);
+
+[DllImport("__Internal")]
+static extern void JSCheckWallet(int requestId, WalletResponseCallback callback);
+
+[DllImport("__Internal")]
+static extern void JSGetFreighterAddress(int requestId, WalletResponseCallback callback, string isTestnet);
+
+[DllImport("__Internal")]
+static extern void JSGetNetworkDetails(int requestId, WalletResponseCallback callback);
+
+[DllImport("__Internal")]
+static extern void JSSignTransaction(int requestId, WalletResponseCallback callback, string unsignedTransactionEnvelope, string networkPassphrase);</code></pre>
+</figure>
+
+<p>JavaScript returns results through a shared helper that marshals a string into the heap and
+invokes the C# function pointer:</p>
+
+<figure class="code">
+<figcaption><span class="kind">source</span>StellarDevToolkit/Packages/com.scryingstone.stellar-wallet/Runtime/WebGL/StellarClient.jslib, lines 1&ndash;10</figcaption>
+<pre><code>mergeInto(LibraryManager.library, {
+    // Marshals a (requestId, code, data) result back into the static C# callback pointer.
+    $WalletRespond: function (requestId, callback, code, data) {
+        var str = (data === null || data === undefined) ? "" : String(data);
+        var size = lengthBytesUTF8(str) + 1;
+        var ptr = _malloc(size);
+        stringToUTF8(str, ptr, size);
+        {{{ makeDynCall('viii', 'callback') }}}(requestId, code, ptr);
+        _free(ptr);
+    },</code></pre>
+</figure>
+
+<p>C# correlates the response back to the awaiting caller by request id:</p>
+
+<figure class="code">
+<figcaption><span class="kind">source</span>StellarDevToolkit/Packages/com.scryingstone.stellar-wallet/Runtime/WalletManager.cs, lines 124&ndash;135</figcaption>
+<pre><code>static Task&lt;JSResponse&gt; InvokeJs(Action&lt;int, WalletResponseCallback&gt; jsCall)
+{
+#if UNITY_WEBGL &amp;&amp; !UNITY_EDITOR
+    int requestId = Interlocked.Increment(ref s_nextRequestId);
+    TaskCompletionSource&lt;JSResponse&gt; tcs = new TaskCompletionSource&lt;JSResponse&gt;();
+    s_pendingRequests[requestId] = tcs;
+    jsCall(requestId, s_responseCallback);
+    return tcs.Task;
+#else
+    return Task.FromResult(new JSResponse { code = -1, data = "Wallet is only available in WebGL builds" });
+#endif
+}</code></pre>
+</figure>
+
+<p>The callback delegate is held in a <code>static readonly</code> field specifically so the GC
+cannot collect it while JavaScript holds its pointer. The consequences of this design: calls are
+<code>Task</code>-shaped and awaitable, results can be returned directly, and there is no
+GameObject name to get wrong.</p>
+
+<h4>Return codes</h4>
+
+<div class="table-wrap">
+<table>
+<thead><tr><th>Function</th><th><code>1</code></th><th>Failure codes</th></tr></thead>
+<tbody>
+<tr><td><code>JSCheckWallet</code></td><td>Available</td><td class="wrap"><code>-1</code> no <code>freighterApi</code>; <code>-2</code> <code>isConnected</code> errored; <code>-3</code> not connected; <code>-666</code> exception</td></tr>
+<tr><td><code>JSGetFreighterAddress</code></td><td><code>data</code> is the address</td><td class="wrap"><code>-1</code> no Stellar JS global, or <code>getNetwork</code> errored; <code>-2</code> wrong network; <code>-3</code> <code>requestAccess</code> errored</td></tr>
+<tr><td><code>JSGetNetworkDetails</code></td><td><code>data</code> is JSON</td><td class="wrap"><code>-1</code> error</td></tr>
+<tr><td><code>JSSignTransaction</code></td><td><code>data</code> is signed XDR</td><td class="wrap"><code>-9</code> user rejected; <code>-1</code> other error; <code>-666</code> exception</td></tr>
+</tbody>
+</table>
+</div>
+
+<h4>Freighter loading</h4>
+
+<p><code>StellarClient.jspre</code> injects the Freighter API itself, so the consuming project's
+template does not have to. It exposes the load promise as
+<code>Module['StellarWalletFreighterReady']</code>, which <code>JSCheckWallet</code> awaits before
+touching <code>window.freighterApi</code>.</p>
+
+<figure class="code">
+<figcaption><span class="kind">source</span>StellarDevToolkit/Packages/com.scryingstone.stellar-wallet/Runtime/WebGL/StellarClient.jspre, lines 27&ndash;31</figcaption>
+<pre><code>var s = document.createElement('script');
+s.src = 'https://cdnjs.cloudflare.com/ajax/libs/stellar-freighter-api/3.0.0/index.min.js';
+s.async = true;
+s.setAttribute('data-stellar-freighter', '1');
+s.onload = onReady;</code></pre>
+</figure>
+
+<p>It checks for <code>window.freighterApi</code> and for an existing
+<code>script[data-stellar-freighter]</code> tag first, so a template that also loads Freighter
+causes no double-load.</p>
+
+<div class="callout gotcha">
+<span class="label">Gotcha</span>
+<p>Freighter loads itself, but <strong>the Stellar JS SDK does not</strong>.
+<code>JSGetFreighterAddress</code> validates the connected network by reading
+<code>Networks.TESTNET</code> or <code>Networks.PUBLIC</code> off a global, and bails out with code
+<code>-1</code> if no global is found:</p>
+<figure class="code">
+<figcaption><span class="kind">source</span>StellarDevToolkit/Packages/com.scryingstone.stellar-wallet/Runtime/WebGL/StellarClient.jslib, lines 50&ndash;54</figcaption>
+<pre><code>const SDK = window.StellarSdk || window.stellarSdk || window.StellarSDK || window.stellarsdk || window.Stellar;
+if (!SDK) {
+    WalletRespond(requestId, callback, -1, `JSGetFreighterAddress() failed because Stellar SDK global not found`);
+    return;
+}</code></pre>
+</figure>
+<p>The symptom is a connect that fails with the extension installed, unlocked and working. This is
+the reason the WebGL template below is mandatory.</p>
+</div>
+
+<h3 id="ch4-template">WebGL template</h3>
+
+<p>A custom template is a folder under <code>Assets/WebGLTemplates/</code> containing
+<code>index.html</code> and a <code>TemplateData/</code> directory. Unity lists it in Player
+Settings once it exists; the sample's selection serializes as
+<code>webGLTemplate: PROJECT:CustomTemplate</code>.</p>
+
+<ol class="steps">
+<li><span class="step-title">Create the folder</span>
+Copy Unity's built-in Default template out of the editor installation to
+<code>Assets/WebGLTemplates/CustomTemplate/</code>. Starting from the built-in template keeps the
+<code>{{{ LOADER_FILENAME }}}</code>-style macros intact, which Unity substitutes at build time.</li>
+
+<li><span class="step-title">Add the Stellar JS SDK</span>
+Drop a built <code>stellar-sdk.js</code> into <code>CustomTemplate/Scripts/</code> and reference it
+from the document head. This is the global the jslib needs.</li>
+
+<li><span class="step-title">Add the head scripts</span>
+<figure class="code">
+<figcaption><span class="kind">source</span>StellarDevToolkit/Assets/WebGLTemplates/CustomTemplate/index.html, lines 9&ndash;16</figcaption>
+<pre><code>&lt;script src="https://cdnjs.cloudflare.com/ajax/libs/stellar-freighter-api/3.0.0/index.min.js"&gt;&lt;/script&gt;
+&lt;script src="Scripts/stellar-sdk.js"&gt;&lt;/script&gt;
+&lt;script type="module"&gt;
+	import init, { decode, encode, guess, types, schema } from './Scripts/stellar_xdr_json.js';
+	init().then(() =&gt; {
+		window.xdr = { decode, encode, guess, types, schema };
+	});
+&lt;/script&gt;</code></pre>
+</figure>
+<ul>
+<li>Line 9, Freighter from CDN: redundant with <code>.jspre</code>, and harmless &mdash; the
+<code>.jspre</code> detects it. Keeping it loads the extension API slightly earlier.</li>
+<li>Line 10, <code>stellar-sdk.js</code>: <strong>required.</strong> Provides the
+<code>Networks</code> global.</li>
+<li>Lines 11&ndash;16, <code>stellar_xdr_json</code>: optional. A wasm module exposing
+<code>window.xdr</code> for decoding XDR in the browser console. Useful for debugging envelopes;
+nothing in the C# path uses it.</li>
+</ul>
+</li>
+
+<li><span class="step-title">Leave the loader alone</span>
+Nothing wallet-related hooks into <code>createUnityInstance</code>. The template's
+<code>.then((unityInstance) =&gt; ...)</code> block only wires the fullscreen and unload buttons.
+Because the bridge is callback-based, no reference to <code>unityInstance</code> is needed for
+signing.</li>
+
+<li><span class="step-title">Select it</span>
+Player Settings, Resolution and Presentation, WebGL Template.</li>
+</ol>
+
+<div class="callout note">
+<span class="label">Note</span>
+<p><code>Assets/Plugins/WebGL/OpenLink.jslib</code> is a much smaller second example of the same
+mechanism. It exports one function, <code>JSOpenLinkInNewTab</code>, used by
+<code>LinkOpener.cs</code> to open Stellar Expert transaction links &mdash; <code>Application.OpenURL</code>
+replaces the page in a WebGL build rather than opening a tab.</p>
+</div>
+
+<h3 id="ch4-settings">Player settings</h3>
+
+<p>The sample's WebGL configuration, and why each value matters:</p>
+
+<div class="table-wrap">
+<table>
+<thead><tr><th>Setting</th><th>Value</th><th>Consequence</th></tr></thead>
+<tbody>
+<tr><td>Scripting backend</td><td>IL2CPP</td><td>The only option for WebGL.</td></tr>
+<tr><td>Managed stripping level</td><td><code>1</code> (High)</td><td class="wrap">Makes <code>link.xml</code> mandatory. Reflection-driven JSON breaks without it.</td></tr>
+<tr><td><code>webGLExceptionSupport</code></td><td><code>1</code></td><td class="wrap">Explicitly thrown exceptions only. Null dereferences and array bounds are not caught, and can fault the module instead of throwing.</td></tr>
+<tr><td><code>webGLCompressionFormat</code></td><td><code>0</code> (disabled)</td><td class="wrap">Larger download, but works on static hosts and from <code>file://</code> without server-side content-encoding.</td></tr>
+<tr><td><code>webGLMemorySize</code> / initial</td><td><code>32</code> MB</td><td>Starting heap.</td></tr>
+<tr><td><code>webGLMaximumMemorySize</code></td><td><code>2048</code> MB</td><td class="wrap">Ceiling. XDR decoding allocates in bursts.</td></tr>
+<tr><td><code>webGLMemoryGrowthMode</code></td><td><code>2</code> (geometric)</td><td>Grows on demand.</td></tr>
+<tr><td><code>webGLThreadsSupport</code></td><td><code>0</code></td><td class="wrap">Off. Nothing in the toolkit needs threads, and enabling it requires cross-origin isolation headers.</td></tr>
+</tbody>
+</table>
+</div>
+
+<h3 id="ch4-testing">Testing</h3>
+
+<p>The wallet path is gated on <code>#if UNITY_WEBGL &amp;&amp; !UNITY_EDITOR</code>. With WebGL as
+the active build target the Editor still takes the <code>#else</code> branch.</p>
+
+<ul>
+<li><code>CanFindWalletAsync()</code> returns <code>false</code> unconditionally in the Editor.</li>
+<li><code>InvokeJs</code> returns code <code>-1</code> with
+<code>"Wallet is only available in WebGL builds"</code>, which surfaces as
+<code>WalletNotAvailable</code>.</li>
+</ul>
+
+<p>Develop against <code>SigningMethod.PrivateKey</code> and verify wallet signing in a real
+browser build. Serve the build over http or https &mdash; browser extensions do not inject into
+<code>file://</code> pages, so <code>window.freighterApi</code> will never appear.</p>
+
+<h3 id="ch4-checklist">Checklist</h3>
+
+<ul class="checklist">
+<li>Freighter extension installed and unlocked.</li>
+<li>Freighter's selected network matches the <code>isTestnet</code> argument passed to
+<code>ConnectWallet</code>, or the address request fails with code <code>-2</code>.</li>
+<li><code>stellar-sdk.js</code> loaded by the template, exposing a <code>Networks</code> global.</li>
+<li>Custom template selected in Player Settings.</li>
+<li><code>link.xml</code> present, covering both <code>StellarSDK.Runtime</code> and
+<code>StellarSDK.Wallet.Runtime</code>.</li>
+<li><code>.jslib</code> and <code>.jspre</code> import settings enabled for WebGL.</li>
+<li>Build served over http or https, not opened from disk.</li>
+<li><code>Network.UseTestNetwork()</code> or <code>UsePublicNetwork()</code> called before the first
+signature.</li>
+</ul>
+
+<!-- ==================== CHAPTER 5 ==================== -->
+
+<h2 id="ch5"><span class="ch-num">Chapter 5</span>RPC calls</h2>
+
+<p>Reads are cheap, unsigned, and instant compared to invocations. Anything that can be answered
+by an RPC read should be, especially on a hot path.</p>
+
+<h3 id="ch5-transport">Transport</h3>
+
+<p>Every request in the SDK goes through one method. There is no connection pool, no retry, and no
+timeout beyond the platform default.</p>
+
+<figure class="code">
+<figcaption><span class="kind">source</span>StellarDevToolkit/Packages/com.scryingstone.stellar-sdk/Runtime/Core/StellarClient.cs, lines 1061&ndash;1085</figcaption>
+<pre><code>static async Task&lt;Result&lt;T&gt;&gt; SendJsonRequest&lt;T&gt;(NetworkContext context, JsonRpcRequest request)
+{
+    string json = JsonConvert.SerializeObject(request, jsonSettings);
+    UnityWebRequest unityWebRequest = new(context.serverUri, "POST")
+    {
+        uploadHandler = new UploadHandlerRaw(Encoding.UTF8.GetBytes(json)),
+        downloadHandler = new DownloadHandlerBuffer(),
+    };
+    unityWebRequest.SetRequestHeader("Content-Type", "application/json");
+    DebugLog($"SendJsonRequest: request: {json}");
+    await unityWebRequest.SendWebRequest();
+    if (unityWebRequest.result == UnityWebRequest.Result.ConnectionError || unityWebRequest.result == UnityWebRequest.Result.ProtocolError)
+    {
+        return Result&lt;T&gt;.Err(StatusCode.NETWORK_ERROR, $"SendJsonRequest: error: {unityWebRequest.error}");
+    }
+    DebugLog($"SendJsonRequest: response: {unityWebRequest.downloadHandler.text}");
+    string responseText = unityWebRequest.downloadHandler.text;
+
+    T result = JsonConvert.DeserializeObject&lt;JsonRpcResponse&lt;T&gt;&gt;(responseText, jsonSettings).Result;
+    if (result == null)
+    {
+        return Result&lt;T&gt;.Err(StatusCode.DESERIALIZATION_ERROR, "SendJsonRequest: error: JSON deserialization failed");
+    }
+    return Result&lt;T&gt;.Ok(result);
+}</code></pre>
+</figure>
+
+<p>Serialization is Newtonsoft with a <code>CamelCaseNamingStrategy</code> contract resolver, which
+is why the C# DTOs use <code>PascalCase</code> properties and the wire format is
+<code>camelCase</code>.</p>
+
+<h3 id="ch5-methods">Methods</h3>
+
+<div class="table-wrap">
+<table>
+<thead><tr><th>C#</th><th>JSON-RPC</th><th>Parameters</th></tr></thead>
+<tbody>
+<tr><td><code>GetHealthAsync</code></td><td><code>getHealth</code></td><td>&mdash;</td></tr>
+<tr><td><code>GetLatestLedgerAsync</code></td><td><code>getLatestLedger</code></td><td>&mdash;</td></tr>
+<tr><td><code>GetNetworkAsync</code></td><td><code>getNetwork</code></td><td>&mdash;</td></tr>
+<tr><td><code>GetVersionInfoAsync</code></td><td><code>getVersionInfo</code></td><td>&mdash;</td></tr>
+<tr><td><code>GetFeeStatsAsync</code></td><td><code>getFeeStats</code></td><td>&mdash;</td></tr>
+<tr><td><code>GetLedgerEntriesAsync</code></td><td><code>getLedgerEntries</code></td><td><code>GetLedgerEntriesParams</code></td></tr>
+<tr><td><code>GetLedgersAsync</code></td><td><code>getLedgers</code></td><td><code>GetLedgersParams</code></td></tr>
+<tr><td><code>GetTransactionsAsync</code></td><td><code>getTransactions</code></td><td><code>GetTransactionsParams</code></td></tr>
+<tr><td><code>GetEventsAsync</code></td><td><code>getEvents</code></td><td><code>GetEventsParams</code></td></tr>
+</tbody>
+</table>
+</div>
+
+<p><code>simulateTransaction</code>, <code>sendTransaction</code> and <code>getTransaction</code> are
+implemented but <code>internal</code>. They are reached through the contract helpers in
+<a href="#ch6">Chapter 6</a>.</p>
+
+<h3 id="ch5-ledgerkeys">Ledger keys</h3>
+
+<p>There is no <code>getAccount</code> method in Soroban RPC, and therefore none in the SDK.
+Account state is read by encoding a ledger key and passing it to
+<code>getLedgerEntries</code>:</p>
+
+<figure class="code">
+<figcaption><span class="kind">source</span>StellarDevToolkit/Packages/com.scryingstone.stellar-sdk/Runtime/Core/StellarClient.cs, lines 219&ndash;238</figcaption>
+<pre><code>public static async Task&lt;Result&lt;AccountEntry&gt;&gt; ReqAccountEntry(NetworkContext context, StellarClientTask task = null)
+{
+    using var _ = new StellarClientTask.Scope(task, "ReqAccountEntry");
+    string encodedKey = EncodedAccountKey(context);
+    var result = await GetLedgerEntriesAsync(context, new GetLedgerEntriesParams()
+    {
+        Keys = new[] { encodedKey },
+    }, task);
+    if (result.IsError)
+    {
+        return Result&lt;AccountEntry&gt;.Err(result);
+    }
+    GetLedgerEntriesResult getLedgerEntriesResult = result.Value;
+    if (getLedgerEntriesResult.Entries.Count != 1)
+    {
+        return Result&lt;AccountEntry&gt;.Err(StatusCode.ENTRY_NOT_FOUND, $"ReqAccountEntry on {context.userAccount.XdrPublicKey} failed because there was not exactly one entry");
+    }
+    LedgerEntry.dataUnion.Account entry = getLedgerEntriesResult.Entries.First().LedgerEntryData as LedgerEntry.dataUnion.Account;
+    return Result&lt;AccountEntry&gt;.Ok(entry?.account);
+}</code></pre>
+</figure>
+
+<p>An unfunded or nonexistent account returns zero entries, so <code>ENTRY_NOT_FOUND</code> is the
+practical "does this account exist" check.</p>
+
+<p>The same mechanism reads contract storage directly, with no invocation, no signature and no fee.
+<code>MakeLedgerKey</code> builds the key for a contract storage entry:</p>
+
+<figure class="code">
+<figcaption><span class="kind">source</span>StellarDevToolkit/Packages/com.scryingstone.stellar-sdk/Runtime/Core/StellarClient.cs, lines 1106&ndash;1132</figcaption>
+<pre><code>public static LedgerKey MakeLedgerKey(NetworkContext context, string sym, object key, ContractDataDurability durability)
+{
+    SCVal scKey = SCUtility.NativeToSCVal(key);
+    SCVal.ScvVec enumKey = new()
+    {
+        vec = new SCVec(new[]
+        {
+            new SCVal.ScvSymbol
+            {
+                sym = sym,
+            },
+            scKey,
+        }),
+    };
+    return new LedgerKey.ContractData
+    {
+        contractData = new LedgerKey.contractDataStruct
+        {
+            contract = new SCAddress.ScAddressTypeContract
+            {
+                contractId = new Hash(StrKey.DecodeContractId(context.contractAddress)),
+            },
+            key = enumKey,
+            durability = durability,
+        },
+    };
+}</code></pre>
+</figure>
+
+<p>The <code>sym</code> and <code>key</code> pair maps onto a Rust storage key of the form
+<code>DataKey::Variant(value)</code>, which serializes as a two-element vector of a symbol and the
+payload. Encode the result with <code>LedgerKeyXdr.EncodeToBase64</code> and pass it in
+<code>GetLedgerEntriesParams.Keys</code>.</p>
+
+<p><code>getLedgerEntries</code> takes an array, so many keys resolve in one request. The NFT owner
+map in <a href="#ch7-owned">Chapter 7</a> batches 200 at a time.</p>
+
+<div class="callout note">
+<span class="label">Note</span>
+<p>Reading storage directly couples your client to the contract's internal storage layout rather
+than to its public interface. Renaming a <code>DataKey</code> variant breaks the read with no
+compile-time warning. It is the right trade for polling game state, and the wrong one for
+occasional reads where a simulation is clearer.</p>
+</div>
+
+<h3 id="ch5-lazy">Lazy XDR decoding</h3>
+
+<p>RPC responses carry XDR as base64 strings. The generated DTOs hold the raw strings; hand-written
+partial classes add properties that decode on access.</p>
+
+<div class="table-wrap">
+<table>
+<thead><tr><th>Type</th><th>Decoded properties</th></tr></thead>
+<tbody>
+<tr><td><code>Entries</code></td><td><code>LedgerKey</code>, <code>LedgerEntryData</code></td></tr>
+<tr><td><code>Results</code></td><td><code>Result</code> (an <code>SCVal</code>), <code>SorobanAuthorizations</code></td></tr>
+<tr><td><code>GetTransactionResult</code></td><td class="wrap"><code>TransactionResult</code>, <code>TransactionResultMeta</code>, <code>TransactionEnvelope</code>, <code>DiagnosticEventsXdr</code></td></tr>
+<tr><td><code>SendTransactionResult</code></td><td><code>ErrorResult</code>, <code>DiagnosticEvents</code></td></tr>
+<tr><td><code>SimulateTransactionResult</code></td><td><code>SorobanTransactionData</code>, <code>DiagnosticEvents</code></td></tr>
+<tr><td><code>StateChanges</code></td><td><code>LedgerBefore</code>, <code>LedgerAfter</code></td></tr>
+</tbody>
+</table>
+</div>
+
+<p>Decoding is not free and not cached. Each access re-runs the XDR reader, so assign to a local
+rather than touching the property repeatedly in a loop.</p>
+
+<h3 id="ch5-errors">Error handling</h3>
+
+<ul>
+<li><code>NETWORK_ERROR</code>: transport failure, from <code>ConnectionError</code> or
+<code>ProtocolError</code>.</li>
+<li><code>DESERIALIZATION_ERROR</code>: the response body produced a null result.</li>
+<li><code>ENTRY_NOT_FOUND</code>: a ledger entry read returned the wrong number of entries. Logged
+as a warning rather than an error, since it is frequently expected.</li>
+</ul>
+
+<div class="callout gotcha">
+<span class="label">Gotcha</span>
+<p><code>SendJsonRequest</code> never inspects the JSON-RPC <code>error</code> member. It reads
+<code>.Result</code> and only fails if that is null. A <code>JsonRpcException</code> type exists in
+<code>JsonRpc.cs</code> but is never thrown. A node-level error can therefore arrive as
+<code>IsOk == true</code> with a default-valued payload. Check the fields you care about, not just
+<code>IsOk</code>.</p>
+</div>
+
+<p><code>Assets/Scripts/RpcTests.cs</code> is a working pass/fail harness covering every read
+endpoint plus contract round trips, and is worth copying into a new project as a connectivity
+check.</p>
+
+<!-- ==================== CHAPTER 6 ==================== -->
+
+<h2 id="ch6"><span class="ch-num">Chapter 6</span>Simulation and invocation</h2>
+
+<p>Soroban requires simulation before submission. Simulation is what discovers the storage
+footprint, the resource fee, and the authorization entries a transaction needs; a transaction
+assembled without it will be rejected.</p>
+
+<h3 id="ch6-entry">Entry points</h3>
+
+<div class="table-wrap">
+<table>
+<thead><tr><th></th><th><code>SimulateContractFunction</code></th><th><code>CallContractFunction</code></th></tr></thead>
+<tbody>
+<tr><td>Cost</td><td>Free</td><td>Resource and inclusion fees</td></tr>
+<tr><td>Signature</td><td>None</td><td>Required</td></tr>
+<tr><td>State</td><td>Read-only, nothing committed</td><td>Committed to the ledger</td></tr>
+<tr><td>Duration</td><td>One round trip</td><td>5&ndash;15 seconds typical</td></tr>
+<tr><td>Returns</td><td class="wrap"><code>(Transaction, SimulateTransactionResult)</code></td><td class="wrap"><code>(SimulateTransactionResult, SendTransactionResult, GetTransactionResult)</code></td></tr>
+</tbody>
+</table>
+</div>
+
+<figure class="code">
+<figcaption><span class="kind">source</span>Signatures from StellarClient.cs, lines 118 and 170</figcaption>
+<pre><code>public static async Task&lt;Result&lt;(SimulateTransactionResult, SendTransactionResult, GetTransactionResult)&gt;&gt;
+    CallContractFunction(NetworkContext context, string functionName, SCVal[] args, StellarClientTask task = null)
+
+public static async Task&lt;Result&lt;(Transaction, SimulateTransactionResult)&gt;&gt;
+    SimulateContractFunction(NetworkContext context, string functionName, SCVal[] args, bool skipAccountEntry = false, StellarClientTask task = null)</code></pre>
+</figure>
+
+<p>Use simulation for every read. A contract getter invoked for real costs money, takes fifteen
+seconds, and returns the same value.</p>
+
+<p>Reading a simulated return value means reaching into the first result:</p>
+
+<figure class="code">
+<figcaption><span class="kind example">example</span>Reading a simulated return value</figcaption>
+<pre><code>Result&lt;(Transaction, SimulateTransactionResult)&gt; result =
+    await StellarClient.SimulateContractFunction(context, "echo_u32", new SCVal[]
+    {
+        new SCVal.ScvU32 { u32 = new uint32(42) },
+    }, skipAccountEntry: true, task);
+
+if (result.IsError)
+{
+    return;
+}
+
+SCVal raw = result.Value.Item2.Results?.FirstOrDefault()?.Result;
+uint value = SCUtility.SCValToNative&lt;uint&gt;(raw);</code></pre>
+</figure>
+
+<h3 id="ch6-pipeline">Invocation pipeline</h3>
+
+<p><code>CallContractFunction</code> runs eight steps. Understanding them explains most failures.</p>
+
+<ol class="steps">
+<li><span class="step-title">Simulate</span>
+Calls <code>SimulateContractFunction</code> with <code>skipAccountEntry: false</code>, so the real
+account and sequence number are fetched first. <code>BuildInvokeContractTransaction</code> creates
+an <code>InvokeHostFunction</code> operation with a base fee of 100,000 stroops.</li>
+
+<li><span class="step-title">Check the simulation</span>
+A non-null <code>sim.Error</code> stops here. <code>HasContractError</code> scans the diagnostic
+events for an <code>SCError.SceContract</code> topic and picks <code>CONTRACT_ERROR</code> if found,
+<code>SIMULATION_FAILED</code> otherwise. A contract <code>panic!</code> surfaces at this step, not
+at submission.</li>
+
+<li><span class="step-title">Double the resource fee</span>
+<code>long minResourceFee = long.Parse(sim.MinResourceFee) * 2;</code> Ledger state can change
+between simulation and submission, which would make the simulated fee insufficient. Overpaying is
+safe &mdash; the unused refundable portion is returned.</li>
+
+<li><span class="step-title">Assemble</span>
+<code>sim.ApplyTo(transaction)</code> clones the transaction, adds the resource fee, writes the
+footprint into <code>transaction.ext</code>, and copies the authorization entries into the
+operation:
+<figure class="code">
+<figcaption><span class="kind">source</span>StellarDevToolkit/Packages/com.scryingstone.stellar-sdk/Runtime/RPC/SimulateTransactionResult.cs, lines 115&ndash;130</figcaption>
+<pre><code>if (uint.TryParse(MinResourceFee, out var resourceFee))
+{
+    transaction.fee += resourceFee;
+}
+
+transaction.ext = new Transaction.extUnion.case_1() { sorobanData = SorobanTransactionData };
+
+if (transaction.IsSorobanInvocation())
+{
+    Results results = Results.FirstOrDefault();
+    if (results != null)
+    {
+        (transaction.operations[0].body as Operation.bodyUnion.InvokeHostFunction).invokeHostFunctionOp.auth = results.SorobanAuthorizations.ToArray();
+    }
+
+}</code></pre>
+</figure>
+It clones rather than mutating so that repeated simulations do not compound the fee.</li>
+
+<li><span class="step-title">Sign</span>
+Dispatches on <code>signingMethod</code> as described in <a href="#ch4-paths">Chapter 4</a>.
+<code>WALLET_SIGNING_CANCELLED</code> is forwarded unchanged; every other signing failure becomes
+<code>WALLET_ERROR</code>.</li>
+
+<li><span class="step-title">Submit</span>
+<code>sendTransaction</code>. A non-null <code>send.ErrorResult</code> yields
+<code>TRANSACTION_SEND_FAILED</code>. Success here only means the node accepted the transaction
+into its queue, not that it succeeded.</li>
+
+<li><span class="step-title">Poll</span>
+<code>WaitForGetTransactionResult</code> waits <code>pollRateMs</code>, then calls
+<code>getTransaction</code> up to <code>maxAttempts</code> times. <code>NOT_FOUND</code> means keep
+waiting, <code>FAILED</code> yields <code>TRANSACTION_FAILED</code>, <code>SUCCESS</code> returns.
+Exhausting the attempts yields <code>TRANSACTION_TIMEOUT</code>. At the sample's 1000 ms and 30
+attempts the worst case is a 30-second await.</li>
+
+<li><span class="step-title">Return</span>
+All three results are returned together, so fees, diagnostic events and the return value are all
+available.</li>
+</ol>
+
+<div class="callout note">
+<span class="label">Note</span>
+<p><code>TRANSACTION_TIMEOUT</code> does not mean the transaction failed. It means the client gave
+up waiting. The transaction may still be applied. Store the hash from
+<code>SendTransactionResult.Hash</code> and reconcile later rather than assuming failure and
+retrying, which risks double submission.</p>
+</div>
+
+<h3 id="ch6-results">Return values and fees</h3>
+
+<p>An invocation's return value comes out of the transaction meta, not the simulation:</p>
+
+<figure class="code">
+<figcaption><span class="kind example">example</span>Reading an invocation return value</figcaption>
+<pre><code>Result&lt;SorobanInvocationMeta&gt; meta = StellarClient.GetSorobanMeta(getResult);
+if (meta.IsError)
+{
+    return;
+}
+
+Result&lt;SCVal&gt; returnValue = StellarClient.GetSorobanReturnValue(meta.Value);
+Result&lt;int&gt; tokenId = StellarClient.GetU32ReturnValue(returnValue.Value);
+
+Result&lt;SorobanFees&gt; fees = StellarClient.GetSorobanFees(meta.Value);</code></pre>
+</figure>
+
+<div class="table-wrap">
+<table>
+<thead><tr><th>Helper</th><th>Returns</th></tr></thead>
+<tbody>
+<tr><td><code>GetSorobanMeta(GetTransactionResult)</code></td><td class="wrap">Handles <code>TransactionMeta</code> v3 and v4. Fails with <code>DESERIALIZATION_ERROR</code> on a non-Soroban transaction.</td></tr>
+<tr><td><code>GetSorobanReturnValue(meta)</code></td><td class="wrap">The <code>SCVal</code> returned by the contract function.</td></tr>
+<tr><td><code>GetU32ReturnValue(scVal)</code></td><td class="wrap">Type-checked <code>u32</code> unwrap.</td></tr>
+<tr><td><code>GetSorobanFees(meta)</code></td><td class="wrap"><code>TotalNonRefundableResourceFeeCharged</code>, <code>TotalRefundableResourceFeeCharged</code>, <code>RentFeeCharged</code>, and the computed <code>ResourceFeeCharged</code>. All stroops.</td></tr>
+<tr><td><code>GetTransactionFeeCharged(txResult)</code></td><td class="wrap">Total charged, including the inclusion fee.</td></tr>
+<tr><td><code>IsExceededLimitError(getResult)</code></td><td class="wrap">Detects budget exhaustion, by pattern-matching the result meta and scanning diagnostic events for an <code>SCError.SceBudget</code> topic.</td></tr>
+</tbody>
+</table>
+</div>
+
+<h3 id="ch6-scutility">SCVal conversion</h3>
+
+<p><code>SCUtility.NativeToSCVal(object)</code> converts outbound. Unsupported types throw
+<code>InvalidOperationException</code> with the offending type named.</p>
+
+<div class="table-wrap">
+<table>
+<thead><tr><th>C#</th><th>SCVal</th></tr></thead>
+<tbody>
+<tr><td><code>uint</code></td><td><code>ScvU32</code></td></tr>
+<tr><td><code>int</code></td><td><code>ScvI32</code></td></tr>
+<tr><td><code>ulong</code></td><td><code>ScvU64</code></td></tr>
+<tr><td><code>string</code></td><td><code>ScvString</code></td></tr>
+<tr><td><code>bool</code></td><td><code>ScvBool</code></td></tr>
+<tr><td><code>byte[]</code></td><td><code>ScvBytes</code></td></tr>
+<tr><td>any <code>enum</code></td><td><code>ScvU32</code> of the underlying value</td></tr>
+<tr><td><code>Array</code></td><td><code>ScvVec</code>, recursive</td></tr>
+<tr><td><code>IDictionary</code></td><td><code>ScvMap</code>, recursive</td></tr>
+<tr><td><code>Vector2Int</code></td><td class="wrap"><code>ScvMap</code> with <code>"x"</code> and <code>"y"</code> symbol keys</td></tr>
+<tr><td><code>IScvMapCompatable</code></td><td class="wrap">Whatever <code>ToScvMap()</code> returns</td></tr>
+<tr><td>Registered type</td><td class="wrap">Via <code>SCUtility.Register&lt;T&gt;(toScVal, fromScVal)</code></td></tr>
+</tbody>
+</table>
+</div>
+
+<p><code>SCUtility.SCValToNative&lt;T&gt;(SCVal)</code> converts inbound, additionally handling
+<code>Nullable&lt;T&gt;</code>, <code>Dictionary&lt;,&gt;</code>, and value-type structs populated
+from an <code>ScvMap</code>.</p>
+
+<div class="callout gotcha">
+<span class="label">Gotcha</span>
+<p>Struct decoding matches <code>ScvMap</code> keys to <strong>public fields by name</strong>. A
+mismatch leaves the field at its default rather than throwing, so a renamed Rust field shows up as
+a zero score rather than an error. Mirror the Rust type exactly:</p>
+<figure class="code">
+<figcaption><span class="kind">source</span>StellarDevToolkit/Assets/Sample Game/GameController.cs, lines 217&ndash;223</figcaption>
+<pre><code>#pragma warning disable 0649
+struct ShapeCatalogsEntry
+{
+    public uint[] trominos;
+    public uint[] tetrominos;
+}
+#pragma warning restore 0649</code></pre>
+</figure>
+<p>The <code>#pragma</code> suppresses "field is never assigned", which is expected for a type only
+ever populated by reflection.</p>
+</div>
+
+<p>Other helpers: <code>FromXdrString&lt;T&gt;(string)</code> for base64 XDR straight to a native
+type, <code>Get16ByteHash</code> and <code>HashEqual</code> for comparing values, and
+<code>SCVal.EncodeToBase64</code> / <code>DecodeFromBase64</code> as the raw escape hatch. Every
+generated XDR type has a matching <code>{Type}Xdr</code> static class with the same pair.</p>
+
+<h4>Addresses</h4>
+
+<p>Two helpers, not interchangeable:</p>
+
+<ul>
+<li><code>AccountStringToScvAddress(string)</code>: for <code>G...</code> account addresses.
+Decodes via <code>StrKey.DecodeStellarAccountId</code>.</li>
+<li><code>ContractStringToScvAddress(string)</code>: for <code>C...</code> contract addresses.
+Decodes via <code>StrKey.DecodeContractId</code>.</li>
+</ul>
+
+<p>Passing the wrong one throws inside <code>StrKey</code> during argument construction, before any
+network call. Validate user-entered addresses with <code>StrKey.IsValidEd25519PublicKey</code> and
+<code>StrKey.IsValidContractId</code>, as <code>NetworkContextWindow</code> does.</p>
+
+<h3 id="ch6-gotchas">Gotchas</h3>
+
+<div class="callout gotcha">
+<span class="label">Gotcha</span>
+<p><code>skipAccountEntry: true</code> skips the <code>ReqAccountEntry</code> round trip and
+substitutes a placeholder account with sequence number <code>42069</code> and zero balance. Correct
+for pure reads &mdash; it halves the latency and works for an account that does not exist. Never use
+it for a transaction you intend to submit; the sequence number is wrong.</p>
+</div>
+
+<ul>
+<li><strong>No binding generator.</strong> Function names are strings. Declare them once as
+<code>const string</code> on a static class per contract so a typo is a compile error in one place
+rather than a runtime failure everywhere.</li>
+<li><strong><code>RestorePreamble</code> is inert.</strong> It is decoded on
+<code>SimulateTransactionResult</code> but <code>CallContractFunction</code> ignores it. If contract
+data has been archived, the invocation fails and the <code>RestoreFootprint</code> transaction must
+be built by hand.</li>
+<li><strong>Multi-party authorization is manual.</strong>
+<code>GetAuthorisationsRequired(ledgerExpirationRelativeMax)</code> and
+<code>AddAuthorisationSignature(index, pubkey, sig)</code> exist on
+<code>SimulateTransactionResult</code> but are not used by <code>CallContractFunction</code>, which
+only handles the source account's own authorization.</li>
+<li><strong>Diagnostic events are the real error message.</strong> When a simulation fails,
+<code>sim.Error</code> is often terse. <code>sim.DiagnosticEvents</code> carries the contract's own
+error topics and is where the actual cause appears.</li>
+</ul>
+
+<!-- ==================== CHAPTER 7 ==================== -->
+
+<h2 id="ch7"><span class="ch-num">Chapter 7</span>NFTs</h2>
+
+<p>The sample's NFT is a SEP-50 non-fungible token built on the OpenZeppelin Stellar contracts. It
+represents a score reward in three tiers &mdash; 50, 100 and 500 points &mdash; and is minted by the
+game contract rather than by the player.</p>
+
+<h3 id="ch7-contract">The contract</h3>
+
+<p><code>Contracts/nft</code> uses four OpenZeppelin crates, all pinned to <code>=0.7.1</code> on
+<code>soroban-sdk 25</code>:</p>
+
+<ul>
+<li><code>stellar-tokens</code>: <code>Base</code>, <code>NonFungibleToken</code>, and the
+<code>enumerable</code> module.</li>
+<li><code>stellar-access</code>: <code>ownable</code>, for owner storage and checks.</li>
+<li><code>stellar-contract-utils</code>: <code>upgradeable</code>.</li>
+<li><code>stellar-macros</code>: the <code>#[only_owner]</code> attribute.</li>
+</ul>
+
+<p>The pattern to learn is <code>#[contractimpl(contracttrait)]</code>. Applied to a trait impl, it
+exports the trait's default methods as contract functions. An empty impl block therefore produces
+a full working interface:</p>
+
+<figure class="code">
+<figcaption><span class="kind">source</span>Contracts/nft/contracts/hello-world/src/lib.rs, lines 113&ndash;135</figcaption>
+<pre><code>#[contractimpl(contracttrait)]
+impl NonFungibleToken for UnityToken {
+    type ContractType = Enumerable;
+
+    fn token_uri(e: &amp;Env, token_id: u32) -&gt; String {
+        let points = UnityToken::asset_points(e, token_id);
+        uri_for_points(e, points)
+    }
+}
+
+//
+// Extensions
+//
+
+#[contractimpl(contracttrait)]
+impl NonFungibleEnumerable for UnityToken {}
+
+//
+// Utils
+//
+
+#[contractimpl(contracttrait)]
+impl Ownable for UnityToken {}</code></pre>
+</figure>
+
+<p>Declaring <code>type ContractType = Enumerable</code> and overriding only
+<code>token_uri</code> yields <code>balance</code>, <code>owner_of</code>,
+<code>total_supply</code>, <code>get_token_id</code>, <code>name</code>, <code>symbol</code>,
+<code>transfer</code> and the approval functions.</p>
+
+<p>The constructor stores three URIs, one per tier, and sets the owner:</p>
+
+<figure class="code">
+<figcaption><span class="kind">source</span>Contracts/nft/contracts/hello-world/src/lib.rs, lines 73&ndash;92</figcaption>
+<pre><code>pub fn __constructor(
+    e: &amp;Env,
+    owner: Address,
+    uri_50: String,
+    uri_100: String,
+    uri_500: String,
+) {
+    let name = String::from_str(e, "UnityToken");
+    let symbol = String::from_str(e, "SCRYX");
+    Base::set_metadata(e, uri_50.clone(), name, symbol);
+    e.storage().instance().set(&amp;DataKey::Uri50, &amp;uri_50);
+    e.storage().instance().set(&amp;DataKey::Uri100, &amp;uri_100);
+    e.storage().instance().set(&amp;DataKey::Uri500, &amp;uri_500);
+    ownable::set_owner(e, &amp;owner);
+}
+
+#[only_owner]
+pub fn set_minter(e: &amp;Env, minter: Address) {
+    e.storage().instance().set(&amp;DataKey::Minter, &amp;minter);
+}</code></pre>
+</figure>
+
+<p><code>set_minter</code> is the delegation hook. Minting authorizes the stored minter if one is
+set, and the owner otherwise:</p>
+
+<figure class="code">
+<figcaption><span class="kind">source</span>Contracts/nft/contracts/hello-world/src/lib.rs, lines 62&ndash;69</figcaption>
+<pre><code>fn require_minter_or_owner(e: &amp;Env) {
+    let owner = ownable::get_owner(e).expect("owner should be set");
+    if let Some(minter) = e.storage().instance().get::&lt;_, Address&gt;(&amp;DataKey::Minter) {
+        minter.require_auth();
+    } else {
+        owner.require_auth();
+    }
+}</code></pre>
+</figure>
+
+<p>Setting the game contract as minter is what allows a player's own transaction to mint a token
+the player has no authority to mint directly. See
+<a href="#ch8-cross">Cross-contract minting</a>.</p>
+
+<h3 id="ch7-tokenid">Token-id encoding</h3>
+
+<p>The tier is packed into the token id rather than stored separately, which avoids a storage read
+per token:</p>
+
+<figure class="code">
+<figcaption><span class="kind">source</span>Contracts/nft/contracts/hello-world/src/lib.rs, lines 94&ndash;110</figcaption>
+<pre><code>pub fn mint(e: &amp;Env, to: Address, points: u32) -&gt; u32 {
+    require_minter_or_owner(e);
+    require_valid_points(points);
+    let seq = Enumerable::total_supply(e);
+    let token_id = seq
+        .checked_mul(TOKEN_ID_STRIDE)
+        .unwrap()
+        .checked_add(points)
+        .unwrap();
+    Enumerable::non_sequential_mint(e, &amp;to, token_id);
+    token_id
+}
+
+pub fn asset_points(e: &amp;Env, token_id: u32) -&gt; u32 {
+    let _ = Base::owner_of(e, token_id);
+    points_from_token_id(token_id)
+}</code></pre>
+</figure>
+
+<p>With <code>TOKEN_ID_STRIDE = 1000</code>, the id is
+<code>total_supply_before_mint * 1000 + points</code> and the tier is <code>token_id % 1000</code>:</p>
+
+<div class="table-wrap">
+<table>
+<thead><tr><th>Mint</th><th>Supply before</th><th>Points</th><th>Token id</th></tr></thead>
+<tbody>
+<tr><td>1st</td><td>0</td><td>50</td><td><code>50</code></td></tr>
+<tr><td>2nd</td><td>1</td><td>100</td><td><code>1100</code></td></tr>
+<tr><td>3rd</td><td>2</td><td>500</td><td><code>2500</code></td></tr>
+</tbody>
+</table>
+</div>
+
+<p>Because the ids are not consecutive, minting uses
+<code>Enumerable::non_sequential_mint</code> rather than the sequential variant.
+<code>asset_points</code> calls <code>Base::owner_of</code> first purely to assert the token
+exists, discarding the result.</p>
+
+<div class="callout gotcha">
+<span class="label">Gotcha</span>
+<p>Invalid points panic rather than returning a structured error:
+<code>panic!("invalid asset points")</code>. There is no <code>#[contracterror]</code> enum on this
+contract, so Unity sees <code>CONTRACT_ERROR</code> with no code to branch on. Validate the tier
+client-side before invoking &mdash; <code>GameManager.MintSEP50AssetAsync</code> rejects anything
+that is not 50, 100 or 500 before it reaches the network.</p>
+</div>
+
+<h3 id="ch7-helpers">SEP-50 helpers</h3>
+
+<p>The SDK ships hardcoded wrappers for this interface rather than generated bindings. All of them
+read <code>context.contractAddress</code>.</p>
+
+<div class="table-wrap">
+<table>
+<thead><tr><th>Helper</th><th>Contract fn</th><th>Mode</th></tr></thead>
+<tbody>
+<tr><td><code>InvokeSEP50AssetMint</code></td><td><code>mint</code></td><td>Invoke</td></tr>
+<tr><td><code>InvokeSEP50AssetTransfer</code></td><td><code>transfer</code></td><td>Invoke</td></tr>
+<tr><td><code>SimSEP50AssetBalance</code></td><td><code>balance</code></td><td>Simulate</td></tr>
+<tr><td><code>SimSEP50AssetName</code></td><td><code>name</code></td><td>Simulate</td></tr>
+<tr><td><code>SimSEP50AssetSymbol</code></td><td><code>symbol</code></td><td>Simulate</td></tr>
+<tr><td><code>SimSEP50AssetOwner_Of</code></td><td><code>owner_of</code></td><td>Simulate</td></tr>
+<tr><td><code>SimSEP50AssetToken_Uri</code></td><td><code>token_uri</code></td><td>Simulate</td></tr>
+<tr><td><code>SimSEP50AssetPoints</code></td><td><code>asset_points</code></td><td>Simulate</td></tr>
+<tr><td><code>SimSEP50AssetTotal_Supply</code></td><td><code>total_supply</code></td><td>Simulate</td></tr>
+<tr><td><code>SimSEP50AssetGetTokenId</code></td><td><code>get_token_id</code></td><td>Simulate</td></tr>
+<tr><td><code>ReqSEP50AssetOwnerMap</code></td><td>composite</td><td>Simulate + ledger read</td></tr>
+</tbody>
+</table>
+</div>
+
+<p>Every simulate helper passes <code>skipAccountEntry: true</code>, so reads work without a funded
+account.</p>
+
+<p>The sample targets two contracts, so it retargets the context per call. Because
+<code>NetworkContext</code> is a struct, assigning it copies it, and the original is untouched:</p>
+
+<figure class="code">
+<figcaption><span class="kind">source</span>StellarDevToolkit/Assets/Scripts/GameManager.cs, lines 458&ndash;460</figcaption>
+<pre><code>NetworkContext overwrittenContext = context;
+overwrittenContext.contractAddress = normalizedAssetContractAddress;
+Result&lt;Dictionary&lt;int, string&gt;&gt; result = await StellarClient.ReqSEP50AssetOwnerMap(overwrittenContext, clientTask);</code></pre>
+</figure>
+
+<div class="callout note">
+<span class="label">Note</span>
+<p>This is only safe because of the value semantics. If <code>NetworkContext</code> were a class,
+the same code would permanently repoint the game context at the NFT contract, and the next
+<code>register_game_log</code> would invoke the wrong contract. Keep the copy-then-modify shape
+even though it looks redundant.</p>
+</div>
+
+<h3 id="ch7-owned">Finding owned tokens</h3>
+
+<p>There is no "tokens owned by address" query. The naive approach is <code>total_supply</code>,
+then <code>owner_of</code> for every id, which is N+1 simulations.</p>
+
+<p><code>ReqSEP50AssetOwnerMap</code> builds the same map by reading the contract's
+<code>Owner</code> storage entries directly, batching keys 200 at a time:</p>
+
+<figure class="code">
+<figcaption><span class="kind">source</span>StellarDevToolkit/Packages/com.scryingstone.stellar-sdk/Runtime/Core/StellarClient.cs, lines 470&ndash;492</figcaption>
+<pre><code>for (int batchStart = 0; batchStart &lt; totalSupply; batchStart += maxKeysPerRequest)
+{
+    int batchCount = Math.Min(maxKeysPerRequest, totalSupply - batchStart);
+    var keys = new string[batchCount];
+    var expectedTokenIds = new int[batchCount];
+    for (int i = 0; i &lt; batchCount; i++)
+    {
+        int index = batchStart + i;
+        Result&lt;int&gt; tokenIdResult = await SimSEP50AssetGetTokenId(context, index, task);
+        if (tokenIdResult.IsError)
+        {
+            return Result&lt;Dictionary&lt;int, string&gt;&gt;.Err(tokenIdResult);
+        }
+
+        int tokenId = tokenIdResult.Value;
+        expectedTokenIds[i] = tokenId;
+        keys[i] = EncodedOwnerLedgerKey(context, tokenId);
+    }
+
+    var ledgerResult = await GetLedgerEntriesAsync(context, new GetLedgerEntriesParams
+    {
+        Keys = keys,
+    }, task);</code></pre>
+</figure>
+
+<p>The ledger key is the <code>MakeLedgerKey</code> pattern from
+<a href="#ch5-ledgerkeys">Chapter 5</a>, using the symbol <code>"Owner"</code> and a
+<code>u32</code> token id, at <code>PERSISTENT</code> durability:</p>
+
+<figure class="code">
+<figcaption><span class="kind">source</span>StellarDevToolkit/Packages/com.scryingstone.stellar-sdk/Runtime/Core/StellarClient.cs, lines 1145&ndash;1149</figcaption>
+<pre><code>static string EncodedOwnerLedgerKey(NetworkContext context, int tokenId)
+{
+    LedgerKey ledgerKey = MakeLedgerKey(context, "Owner", (uint)tokenId, ContractDataDurability.PERSISTENT);
+    return LedgerKeyXdr.EncodeToBase64(ledgerKey);
+}</code></pre>
+</figure>
+
+<p>The result is <code>Dictionary&lt;int, string&gt;</code> mapping token id to owner
+<code>G...</code> address, for every token in the collection. Filter by the connected account to get
+that player's holdings.</p>
+
+<div class="callout gotcha">
+<span class="label">Gotcha</span>
+<p><code>get_token_id</code> is still simulated once per index, so the enumeration is not free
+&mdash; the batching saves the <code>owner_of</code> calls, not the index lookups. The method also
+fails hard if a batch returns fewer entries than requested, or if any expected token id is missing,
+rather than returning a partial map. For a large collection, consider indexing off
+<code>getEvents</code> instead.</p>
+</div>
+
+<h3 id="ch7-display">Display and metadata</h3>
+
+<p>The sample derives the display name entirely client-side from the token id, with no network
+call:</p>
+
+<figure class="code">
+<figcaption><span class="kind">source</span>StellarDevToolkit/Assets/Scripts/AssetCard.cs, lines 13&ndash;22</figcaption>
+<pre><code>public static string ScoreAssetDisplayName(int tokenId)
+{
+    int points = tokenId % 1000;
+    if (points == 50 || points == 100 || points == 500)
+    {
+        return points + " point (#" + tokenId + ")";
+    }
+
+    return "Token ID: " + tokenId;
+}</code></pre>
+</figure>
+
+<p><code>MarketWindow</code> and <code>AssetModal</code> both instantiate
+<code>AssetCard.prefab</code> from the owner map and call this for the label.
+<code>SendModal</code> handles transfers through <code>GameManager.SendAsset</code>.</p>
+
+<div class="callout todo">
+<span class="label">Not in the repository</span>
+<p>The sample never calls <code>token_uri</code> at runtime and does no image loading &mdash; card
+art is a sprite assigned on the prefab. Real NFT artwork requires fetching the URI and the image
+yourself. The following is illustrative and is not present in the repository:</p>
+<figure class="code">
+<figcaption><span class="kind example">example</span>Loading artwork from token_uri</figcaption>
+<pre><code>public static async Task&lt;Texture2D&gt; LoadTokenArtAsync(NetworkContext context, int tokenId)
+{
+    Result&lt;string&gt; uriResult = await StellarClient.SimSEP50AssetToken_Uri(context, tokenId);
+    if (uriResult.IsError)
+    {
+        return null;
+    }
+
+    // ipfs:// is not a scheme UnityWebRequest understands.
+    string uri = uriResult.Value;
+    if (uri.StartsWith("ipfs://"))
+    {
+        uri = "https://ipfs.io/ipfs/" + uri.Substring("ipfs://".Length);
+    }
+
+    using UnityWebRequest request = UnityWebRequestTexture.GetTexture(uri);
+    await request.SendWebRequest();
+    if (request.result != UnityWebRequest.Result.Success)
+    {
+        Debug.LogError($"LoadTokenArt {tokenId}: {request.error}");
+        return null;
+    }
+
+    return DownloadHandlerTexture.GetContent(request);
+}</code></pre>
+</figure>
+<p>Two caveats. This contract's <code>token_uri</code> returns one URI per tier, not per token, so
+cache by tier rather than by token id. And if the URI points at a JSON metadata document rather
+than an image, the document has to be fetched and its <code>image</code> field followed &mdash; a
+second request.</p>
+</div>
+
+<!-- ==================== CHAPTER 8 ==================== -->
+
+<h2 id="ch8"><span class="ch-num">Chapter 8</span>Gameplay integration</h2>
+
+<p>The sample game is a Block Blast clone: an 8&times;8 board, three offered polyomino shapes at a
+time, line clears with streak scoring, and a game over when nothing fits. It is a useful test case
+because the scoring is non-trivial enough that a contract cannot simply trust the client.</p>
+
+<h3 id="ch8-determinism">Determinism</h3>
+
+<p>The contract cannot accept a client-reported score. A modified client would report any number.
+The design response is to submit <strong>inputs, not outcomes</strong>, and have the contract replay
+the game.</p>
+
+<p>Three pieces make the replay possible:</p>
+
+<ul>
+<li><strong>A shared seed.</strong> Each game gets one <code>uint</code> seed. Shape offers are
+generated from it by an xorshift32 RNG implemented identically in C# (<code>IntegerRng</code>) and
+Rust. Offer batches are a function of the seed and the move count.</li>
+<li><strong>A shared shape catalog.</strong> 6 trominoes and 19 tetrominoes, as packed 25-bit
+footprint masks over a 5&times;5 grid. Unity fetches them from the contract rather than hardcoding
+them, so the two sides cannot drift.</li>
+<li><strong>Packed moves.</strong> One byte per move, with an identical layout on both sides.</li>
+</ul>
+
+<figure class="code">
+<figcaption><span class="kind">source</span>StellarDevToolkit/Assets/Sample Game/GameMovePacking.cs, lines 1&ndash;22</figcaption>
+<pre><code>// Packed move layout (one byte).
+// Rust unpack:
+//   let tray = packed &amp; 0b11;
+//   let x = (packed &gt;&gt; 2) &amp; 0b111;
+//   let y = (packed &gt;&gt; 5) &amp; 0b111;
+//
+// bits 0-1: tray index 0|1|2
+// bits 2-4: drop cell x (0-7)
+// bits 5-7: drop cell y (0-7)
+public static class GameMovePacking
+{
+    const int TrayBitCount = 2;
+    const int CoordBitCount = 3;
+    const int TrayMask = 0b11;
+    const int CoordMask = 0b111;
+
+    public static byte Pack(int cellX, int cellY, int trayIndex)
+    {
+        return (byte)((trayIndex &amp; TrayMask)
+            | ((cellX &amp; CoordMask) &lt;&lt; TrayBitCount)
+            | ((cellY &amp; CoordMask) &lt;&lt; (TrayBitCount + CoordBitCount)));
+    }</code></pre>
+</figure>
+
+<p>A full game is therefore a <code>u64</code> seed plus one byte per move. On submission the
+contract replays it:</p>
+
+<figure class="code">
+<figcaption><span class="kind">source</span>Contracts/unity-sample/contracts/hello-world/src/game.rs, lines 288&ndash;302</figcaption>
+<pre><code>pub(crate) fn validate_game_log(game_log: &amp;GameLog) -&gt; Result&lt;u32, Error&gt; {
+    let packed = &amp;game_log.packed_moves.packed;
+    let move_count = packed.len();
+    if move_count &gt; MAX_REPLAY_MOVES {
+        return Err(Error::InvalidGameLog);
+    }
+    let mut sim = Sim::new(game_log.seed);
+    for i in 0..move_count {
+        let packed_byte = packed.get(i).ok_or(Error::InvalidGameLog)?;
+        sim.apply_move(&amp;unpack_move(packed_byte))?;
+    }
+    // A log that stops before the board is stuck is accepted: the score only ever
+    // accumulates, so a short replay can only score lower than the full game.
+    Ok(sim.score)
+}</code></pre>
+</figure>
+
+<p>An illegal placement, a reused tray slot, or a score that does not match the recomputed total
+is rejected. Scoring is <code>BASE_POINTS_PER_LINE = 10</code> with a streak bonus capped at
+<code>MAX_STREAK_BONUS_PERCENT = 150</code>, and the replay limit is
+<code>MAX_REPLAY_MOVES = 10_000</code>.</p>
+
+<div class="callout note">
+<span class="label">Note</span>
+<p>This is the transferable lesson from the sample, independent of the game. Any score, time or
+outcome your contract records should be derivable from inputs the contract can re-execute. If it
+cannot, the number is a claim rather than a fact.</p>
+</div>
+
+<h3 id="ch8-calls">Contract calls</h3>
+
+<p>Gameplay touches the chain exactly twice per game.</p>
+
+<h4>Game start: simulate only</h4>
+
+<figure class="code">
+<figcaption><span class="kind">source</span>StellarDevToolkit/Assets/Sample Game/GameController.cs, lines 237&ndash;259</figcaption>
+<pre><code>async Task&lt;bool&gt; TryLoadShapeCatalogsFromContract(NetworkContext context, uint seed)
+{
+    SCVal[] args = { U64(seed) };
+    StellarClientTask task = GameManager.Instance != null ? GameManager.Instance.ClientTask : null;
+    Result&lt;(Transaction, SimulateTransactionResult)&gt; result =
+        await StellarClient.SimulateContractFunction(context, "start_game_check", args, true, task);
+    if (result.IsError || result.Value.Item2 == null || result.Value.Item2.Error != null)
+    {
+        Debug.LogError($"GameController: start_game_check failed: {result.Message}", this);
+        return false;
+    }
+
+    SCVal raw = result.Value.Item2.Results?.FirstOrDefault()?.Result;
+    if (raw == null)
+    {
+        Debug.LogError("GameController: start_game_check returned no result.", this);
+        return false;
+    }
+
+    ShapeCatalogsEntry catalogs;
+    try
+    {
+        catalogs = SCUtility.SCValToNative&lt;ShapeCatalogsEntry&gt;(raw);</code></pre>
+</figure>
+
+<p>Free, no signature, <code>skipAccountEntry: true</code>. It runs on every game start.</p>
+
+<div class="callout note">
+<span class="label">Note</span>
+<p><code>start_game_check</code> takes a seed but <code>game::shape_catalogs</code> ignores it
+&mdash; the parameter is <code>_seed</code> and the catalogs are compile-time constants. The call
+exists to guarantee both sides share one shape table, not to derive anything from the seed. The
+seed only drives which shapes are offered, which the client computes locally.</p>
+</div>
+
+<h4>Game over: full invocation</h4>
+
+<figure class="code">
+<figcaption><span class="kind">source</span>StellarDevToolkit/Assets/Sample Game/GameController.cs, lines 152&ndash;165</figcaption>
+<pre><code>SCVal player = StellarClient.AccountStringToScvAddress(context.userAccount.AccountId);
+SCVal[] args = { player, BuildGameLogVal() };
+Debug.Log($"GameController: register_game_log seed={gameState.GameSeed} score={score} moves={gameState.PackedMoves.Count}.", this);
+Result&lt;(SimulateTransactionResult, SendTransactionResult, GetTransactionResult)&gt; result =
+    await StellarClient.CallContractFunction(context, "register_game_log", args, GameManager.Instance.ClientTask);
+if (result.IsError)
+{
+    Debug.LogError($"GameController: register_game_log failed: {result.Message}", this);
+    return false;
+}
+
+Debug.Log($"GameController: register_game_log succeeded txHash={result.Value.Item2.Hash} status={result.Value.Item3.Status}.", this);
+int? rewardPoints = HighestScoreAsset(score);
+GameLogSubmitted?.Invoke(rewardPoints);</code></pre>
+</figure>
+
+<p>The <code>GameLog</code> argument is a hand-built <code>SCVal</code> map. Field names and types
+must match the Rust <code>#[contracttype]</code> exactly:</p>
+
+<figure class="code">
+<figcaption><span class="kind">source</span>StellarDevToolkit/Assets/Sample Game/GameController.cs, lines 199&ndash;215</figcaption>
+<pre><code>SCVal BuildGameLogVal()
+{
+    byte[] packed = gameState.PackedMoves.ToArray();
+    uint finalScore = gameState.Score &lt; 0 ? 0u : (uint)gameState.Score;
+    return SMap(
+        Entry(Sym("final_score"), U32(finalScore)),
+        Entry(Sym("packed_moves"), SMap(Entry(Sym("packed"), SBytes(packed)))),
+        Entry(Sym("seed"), U64(gameState.GameSeed)),
+        Entry(Sym("submitted_ledger_seq"), U64(0)));
+}
+
+static SCVal U32(uint value) =&gt; new SCVal.ScvU32 { u32 = new uint32(value) };
+static SCVal U64(ulong value) =&gt; new SCVal.ScvU64 { u64 = new uint64(value) };
+static SCVal Sym(string value) =&gt; new SCVal.ScvSymbol { sym = new SCSymbol(value) };
+static SCVal SBytes(byte[] values) =&gt; new SCVal.ScvBytes { bytes = new SCBytes(values ?? Array.Empty&lt;byte&gt;()) };
+static SCVal SMap(params SCMapEntry[] entries) =&gt; new SCVal.ScvMap { map = new SCMap(entries) };
+static SCMapEntry Entry(SCVal key, SCVal val) =&gt; new SCMapEntry { key = key, val = val };</code></pre>
+</figure>
+
+<p>Note the nesting: <code>packed_moves</code> is itself a struct with one field,
+<code>packed</code>, so it becomes a map inside a map. <code>submitted_ledger_seq</code> is sent as
+<code>0</code> and overwritten by the contract with <code>e.ledger().sequence()</code> &mdash; a
+client-supplied timestamp would be meaningless.</p>
+
+<p>The short static helpers at the bottom are worth copying. Raw <code>SCVal</code> construction is
+verbose enough that inline use hurts readability.</p>
+
+<h3 id="ch8-cross">Cross-contract minting</h3>
+
+<p>Inside <code>register_game_log</code>, a qualifying score triggers a mint on the NFT contract:</p>
+
+<figure class="code">
+<figcaption><span class="kind">source</span>Contracts/unity-sample/contracts/hello-world/src/lib.rs, lines 202&ndash;208</figcaption>
+<pre><code>if let Some(points) = highest_score_asset(computed_score) {
+    if let Some(nft) = e.storage().instance().get::&lt;_, Address&gt;(&amp;DataKey::ScoreNft) {
+        NftClient::new(e, &amp;nft).mint(&amp;address, &amp;points);
+    }
+}
+
+Ok(())</code></pre>
+</figure>
+
+<p><code>NftClient</code> is generated from a trait declaration, not imported from the NFT crate:</p>
+
+<figure class="code">
+<figcaption><span class="kind">source</span>Contracts/unity-sample/contracts/hello-world/src/lib.rs, lines 121&ndash;128</figcaption>
+<pre><code>// Minimal client for the OpenZeppelin non-fungible token (SEP-50) contract so we
+// can cross-call it without importing the OZ crate.
+#[contractclient(name = "NftClient")]
+pub trait Nft {
+    fn mint(e: Env, to: Address, points: u32) -&gt; u32;
+    fn transfer(e: Env, from: Address, to: Address, token_id: u32);
+    fn owner_of(e: Env, token_id: u32) -&gt; Address;
+}</code></pre>
+</figure>
+
+<p><code>#[contractclient]</code> generates a typed client from the declared signatures alone. The
+caller needs no dependency on the callee's crate, which is why these two workspaces can sit on
+<code>soroban-sdk</code> 22 and 25 respectively. Only the function names and argument types have to
+match at runtime. Declaring three of the NFT's functions is enough; the rest are simply not
+callable.</p>
+
+<p>Combined with <code>set_minter</code> from <a href="#ch7-contract">Chapter 7</a>, the authorization
+chain is:</p>
+
+<figure class="diagram">
+<svg viewBox="0 0 700 210" role="img" aria-label="Diagram: the player signs one transaction invoking register_game_log on the game contract, which validates the replay and then calls mint on the NFT contract, which authorizes the game contract as its stored minter.">
+  <defs>
+    <marker id="arrow2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#6d7784"></path>
+    </marker>
+  </defs>
+
+  <rect class="svg-box" x="20" y="26" width="180" height="56" rx="5"></rect>
+  <text class="svg-label" x="110" y="50">Player</text>
+  <text class="svg-sub" x="110" y="68">signs once</text>
+
+  <rect class="svg-box" x="260" y="26" width="180" height="56" rx="5"></rect>
+  <text class="svg-label" x="350" y="50">Game contract</text>
+  <text class="svg-sub" x="350" y="68">register_game_log</text>
+
+  <rect class="svg-box" x="500" y="26" width="180" height="56" rx="5"></rect>
+  <text class="svg-label" x="590" y="50">NFT contract</text>
+  <text class="svg-sub" x="590" y="68">mint</text>
+
+  <path class="svg-edge" d="M 200 54 L 258 54" marker-end="url(#arrow2)"></path>
+  <path class="svg-edge" d="M 440 54 L 498 54" marker-end="url(#arrow2)"></path>
+
+  <text class="svg-edge-label" x="229" y="102">invoke</text>
+  <text class="svg-edge-label" x="469" y="102">cross-call</text>
+
+  <rect class="svg-box-alt" x="260" y="132" width="180" height="52" rx="5"></rect>
+  <text class="svg-sub" x="350" y="154">validate_game_log</text>
+  <text class="svg-sub" x="350" y="171">replays the moves</text>
+
+  <rect class="svg-box-alt" x="500" y="132" width="180" height="52" rx="5"></rect>
+  <text class="svg-sub" x="590" y="154">require_minter_or_owner</text>
+  <text class="svg-sub" x="590" y="171">minter = game contract</text>
+
+  <path class="svg-edge" d="M 350 82 L 350 130" marker-end="url(#arrow2)"></path>
+  <path class="svg-edge" d="M 590 82 L 590 130" marker-end="url(#arrow2)"></path>
+</svg>
+<figcaption>One player signature mints a token the player cannot mint directly, because the NFT
+contract's stored minter is the game contract.</figcaption>
+</figure>
+
+<p>From Unity this is a single <code>CallContractFunction</code>. The mint is invisible in the C#
+call &mdash; no second invocation, no second signature.</p>
+
+<div class="callout gotcha">
+<span class="label">Gotcha</span>
+<p>The sample does not read the minted token id back. <code>RewardPopup</code> displays a
+client-side guess from <code>GameController.HighestScoreAsset(score)</code>, which duplicates the
+Rust <code>highest_score_asset</code> tier logic in C#. If the contract's
+<code>DataKey::ScoreNft</code> is unset, no mint happens and the UI still claims a reward. The
+correct source of truth is the invocation result &mdash; read it with
+<code>GetSorobanMeta</code> and <code>GetSorobanReturnValue</code>, or subscribe to the NFT
+contract's mint events via <code>getEvents</code>.</p>
+</div>
+
+<div class="callout note">
+<span class="label">Note</span>
+<p><code>set_score_nft</code> is write-once &mdash; a second call returns
+<code>Error::AlreadyInitialized</code>. It is not invoked from Unity anywhere; wire the two
+contracts together once after deployment using the <code>stellar</code> CLI.</p>
+</div>
+
+<h3 id="ch8-market">Marketplace</h3>
+
+<p>The game contract also implements an NFT marketplace. It is fully written and covered by Rust
+tests, but <strong>no Unity code calls it</strong>.</p>
+
+<div class="table-wrap">
+<table>
+<thead><tr><th>Function</th><th>Behaviour</th></tr></thead>
+<tbody>
+<tr><td><code>init_market(admin, payment_tokens, nft_collections)</code></td><td class="wrap">Write-once. Sets the admin and the two allowlists.</td></tr>
+<tr><td><code>list(req) -&gt; u32</code></td><td class="wrap">Records the listing, then escrows the NFT into the contract. Returns the listing id.</td></tr>
+<tr><td><code>buy(buyer, listing_id)</code></td><td class="wrap">Closes the listing, transfers payment to the seller, releases the NFT to the buyer.</td></tr>
+<tr><td><code>cancel(listing_id)</code></td><td class="wrap">Seller-only. Closes the listing and returns the escrowed NFT.</td></tr>
+<tr><td><code>get_listing(id)</code>, <code>get_listings()</code></td><td class="wrap">Reads. Use simulation.</td></tr>
+</tbody>
+</table>
+</div>
+
+<p>The ordering inside <code>buy</code> is deliberate and worth copying: state is written before any
+external call.</p>
+
+<figure class="code">
+<figcaption><span class="kind">source</span>Contracts/unity-sample/contracts/hello-world/src/lib.rs, lines 313&ndash;331</figcaption>
+<pre><code>        // Effects: close the listing before any external transfer so a malicious
+        // counterparty contract cannot re-enter and buy it twice.
+        listing.active = false;
+        e.storage().persistent().set(&amp;DataKey::Listing(listing_id), &amp;listing);
+        Self::remove_active(e, listing_id);
+
+        // Interactions: charge the buyer in the listing's payment token, then
+        // release the escrowed NFT.
+        token::Client::new(e, &amp;listing.payment_token).transfer(
+            &amp;buyer,
+            &amp;listing.seller,
+            &amp;(listing.price as i128),
+        );
+
+        NftClient::new(e, &amp;listing.asset_contract).transfer(
+            &amp;e.current_contract_address(),
+            &amp;buyer,
+            &amp;listing.asset_id,
+        );</code></pre>
+</figure>
+
+<p>Payment uses <code>soroban_sdk::token::Client</code>, the standard SEP-41 token interface, so any
+compliant token on the allowlist works. Errors are a proper
+<code>#[contracterror]</code> enum with values 1 through 10, including
+<code>ListingNotFound = 5</code>, <code>ListingInactive = 6</code>, <code>NotSeller = 7</code>,
+<code>PaymentTokenNotAllowed = 8</code> and <code>CollectionNotAllowed = 9</code>.</p>
+
+<div class="callout todo">
+<span class="label">Not in the repository</span>
+<p>No C# for the marketplace exists. The following shows the shape it would take. It has not been
+run against the deployed contract and should be treated as a starting point.</p>
+
+<p><code>MarketSellReq</code> is a struct argument, which is what
+<code>IScvMapCompatable</code> is for:</p>
+
+<figure class="code">
+<figcaption><span class="kind example">example</span>A MarketSellReq argument</figcaption>
+<pre><code>public struct MarketSellReq : IScvMapCompatable
+{
+    public string seller;          // G... address
+    public string assetContract;   // C... address
+    public uint assetId;
+    public uint price;
+    public string paymentToken;    // C... address
+
+    // Keys must match the Rust field names exactly, and Soroban requires
+    // map keys in sorted order.
+    public SCVal.ScvMap ToScvMap()
+    {
+        return new SCVal.ScvMap
+        {
+            map = new SCMap(new[]
+            {
+                Entry("asset_contract", StellarClient.ContractStringToScvAddress(assetContract)),
+                Entry("asset_id", new SCVal.ScvU32 { u32 = new uint32(assetId) }),
+                Entry("payment_token", StellarClient.ContractStringToScvAddress(paymentToken)),
+                Entry("price", new SCVal.ScvU32 { u32 = new uint32(price) }),
+                Entry("seller", StellarClient.AccountStringToScvAddress(seller)),
+            }),
+        };
+    }
+
+    static SCMapEntry Entry(string key, SCVal val) =&gt; new SCMapEntry
+    {
+        key = new SCVal.ScvSymbol { sym = new SCSymbol(key) },
+        val = val,
+    };
+}</code></pre>
+</figure>
+
+<figure class="code">
+<figcaption><span class="kind example">example</span>Listing and buying</figcaption>
+<pre><code>public static async Task&lt;Result&lt;int&gt;&gt; ListAsync(NetworkContext context, MarketSellReq req, StellarClientTask task = null)
+{
+    var result = await StellarClient.CallContractFunction(context, "list", new SCVal[]
+    {
+        req.ToScvMap(),
+    }, task);
+
+    if (result.IsError)
+    {
+        return Result&lt;int&gt;.Err(result);
+    }
+
+    // list() returns the new listing id as a u32.
+    Result&lt;SorobanInvocationMeta&gt; meta = StellarClient.GetSorobanMeta(result.Value.Item3);
+    if (meta.IsError)
+    {
+        return Result&lt;int&gt;.Err(meta);
+    }
+
+    Result&lt;SCVal&gt; returnValue = StellarClient.GetSorobanReturnValue(meta.Value);
+    if (returnValue.IsError)
+    {
+        return Result&lt;int&gt;.Err(returnValue);
+    }
+
+    return StellarClient.GetU32ReturnValue(returnValue.Value);
+}
+
+public static async Task&lt;Result&lt;bool&gt;&gt; BuyAsync(NetworkContext context, int listingId, StellarClientTask task = null)
+{
+    var result = await StellarClient.CallContractFunction(context, "buy", new SCVal[]
+    {
+        StellarClient.AccountStringToScvAddress(context.userAccount.AccountId),
+        new SCVal.ScvU32 { u32 = new uint32(checked((uint)listingId)) },
+    }, task);
+
+    return result.IsError
+        ? Result&lt;bool&gt;.Err(result)
+        : Result&lt;bool&gt;.Ok(true);
+}</code></pre>
+</figure>
+
+<p>Both calls need <code>context.contractAddress</code> pointed at the <em>game</em> contract, not
+the NFT contract, since that is where the marketplace lives. <code>list</code> and
+<code>buy</code> each trigger cross-contract transfers, so expect a larger resource fee and a
+longer simulation than a plain write.</p>
+</div>
+
+<p>Also implemented on-chain but not called from Unity: <code>register_player</code>,
+<code>set_score_nft</code>, and <code>packed_moves_to_moves</code>.</p>
+
+<h3 id="ch8-production">Production checklist</h3>
+
+<ul class="checklist">
+<li>No secret seeds in shipped builds. Use <code>SigningMethod.UnityWallet</code> for anything
+public, and treat <code>DefaultSettings.accountSecretSeed</code> as development-only.</li>
+<li>Contract addresses in configuration, not source. They change on every redeploy.</li>
+<li>Every invocation has visible progress. Hook <code>StellarClientTask.OnBusyChanged</code>, and
+block input while <code>WalletManager.IsWalletBusy</code> is true.</li>
+<li><code>WALLET_SIGNING_CANCELLED</code> handled as a normal path, not an error dialog.</li>
+<li><code>TRANSACTION_TIMEOUT</code> handled as "unknown", not "failed". Keep the hash.</li>
+<li>Simulations and ledger reads on hot paths; invocations only at meaningful boundaries. The
+sample writes once per game, not once per move.</li>
+<li>Reward and outcome UI driven by the invocation result, not by a client-side prediction of what
+the contract did.</li>
+<li><code>link.xml</code> covering every assembly with reflection-deserialized types, verified in
+an actual WebGL build.</li>
+</ul>
+
+<!-- ==================== APPENDIX ==================== -->
+
+<h2 id="appendix"><span class="ch-num">Appendix</span>Quick reference</h2>
+
+<h3 id="appendix-status">StatusCode</h3>
+
+<p>From <code>Runtime/Core/Result.cs</code>, in declaration order.</p>
+
+<div class="table-wrap">
+<table>
+<thead><tr><th>Code</th><th>Raised when</th></tr></thead>
+<tbody>
+<tr><td><code>SUCCESS</code></td><td>Operation succeeded. <code>IsOk</code> tests for this.</td></tr>
+<tr><td><code>CONTRACT_ERROR</code></td><td class="wrap">Simulation failed with an <code>SCError.SceContract</code> diagnostic topic.</td></tr>
+<tr><td><code>NETWORK_ERROR</code></td><td>HTTP connection or protocol error.</td></tr>
+<tr><td><code>RPC_ERROR</code></td><td>Declared; not raised by the current code.</td></tr>
+<tr><td><code>TIMEOUT</code></td><td>Declared; not raised by the current code.</td></tr>
+<tr><td><code>OTHER_ERROR</code></td><td class="wrap">General-purpose. Used by application-level validation in the sample.</td></tr>
+<tr><td><code>SERIALIZATION_ERROR</code></td><td>Declared; not raised by the current code.</td></tr>
+<tr><td><code>DESERIALIZATION_ERROR</code></td><td class="wrap">Null response body, or an XDR/meta shape that could not be decoded.</td></tr>
+<tr><td><code>TRANSACTION_FAILED</code></td><td><code>getTransaction</code> returned <code>FAILED</code>.</td></tr>
+<tr><td><code>TRANSACTION_NOT_FOUND</code></td><td>Declared; not raised by the current code.</td></tr>
+<tr><td><code>TRANSACTION_TIMEOUT</code></td><td><code>maxAttempts</code> exhausted while polling.</td></tr>
+<tr><td><code>ENTRY_NOT_FOUND</code></td><td class="wrap">Ledger entry read returned the wrong number of entries. Logged as a warning.</td></tr>
+<tr><td><code>SIMULATION_FAILED</code></td><td>Simulation error with no contract-error topic.</td></tr>
+<tr><td><code>TRANSACTION_SEND_FAILED</code></td><td><code>sendTransaction</code> returned an error result.</td></tr>
+<tr><td><code>WALLET_ERROR</code></td><td>Signing failed, or an unsupported signing method.</td></tr>
+<tr><td><code>WALLET_NOT_AVAILABLE</code></td><td class="wrap"><code>UnityWallet</code> selected but <code>unityWalletSigner</code> is null, or the wallet was not detected.</td></tr>
+<tr><td><code>WALLET_ADDRESS_MISSING</code></td><td>Address request failed.</td></tr>
+<tr><td><code>WALLET_NETWORK_DETAILS_ERROR</code></td><td>Network details request failed.</td></tr>
+<tr><td><code>WALLET_PARSING_ERROR</code></td><td>Network details JSON could not be parsed.</td></tr>
+<tr><td><code>WALLET_SIGNING_ERROR</code></td><td>Signing failed for a reason other than cancellation.</td></tr>
+<tr><td><code>WALLET_SIGNING_CANCELLED</code></td><td>User dismissed the signing popup. Not an error.</td></tr>
+</tbody>
+</table>
+</div>
+
+<p><code>WalletStatusCode</code> mirrors the wallet subset with different names:
+<code>Success</code>, <code>WalletNotAvailable</code>, <code>WalletAddressMissing</code>,
+<code>WalletNetworkDetailsError</code>, <code>WalletParsingError</code>,
+<code>WalletSigningError</code>, <code>WalletSigningCancelled</code>. Map between them with a
+<code>switch</code> expression as <code>GameManager.MapWalletStatusCode</code> does.</p>
+
+<h3 id="appendix-rpc">RPC methods</h3>
+
+<div class="table-wrap">
+<table>
+<thead><tr><th>C#</th><th>JSON-RPC</th><th>Access</th></tr></thead>
+<tbody>
+<tr><td><code>GetHealthAsync</code></td><td><code>getHealth</code></td><td>public</td></tr>
+<tr><td><code>GetLatestLedgerAsync</code></td><td><code>getLatestLedger</code></td><td>public</td></tr>
+<tr><td><code>GetNetworkAsync</code></td><td><code>getNetwork</code></td><td>public</td></tr>
+<tr><td><code>GetVersionInfoAsync</code></td><td><code>getVersionInfo</code></td><td>public</td></tr>
+<tr><td><code>GetFeeStatsAsync</code></td><td><code>getFeeStats</code></td><td>public</td></tr>
+<tr><td><code>GetLedgerEntriesAsync</code></td><td><code>getLedgerEntries</code></td><td>public</td></tr>
+<tr><td><code>GetLedgersAsync</code></td><td><code>getLedgers</code></td><td>public</td></tr>
+<tr><td><code>GetTransactionsAsync</code></td><td><code>getTransactions</code></td><td>public</td></tr>
+<tr><td><code>GetEventsAsync</code></td><td><code>getEvents</code></td><td>public</td></tr>
+<tr><td><code>SimulateTransactionAsync</code></td><td><code>simulateTransaction</code></td><td>internal</td></tr>
+<tr><td><code>SendTransactionAsync</code></td><td><code>sendTransaction</code></td><td>internal</td></tr>
+<tr><td><code>GetTransactionAsync</code></td><td><code>getTransaction</code></td><td>internal</td></tr>
+<tr><td><code>ReqAccountEntry</code></td><td class="wrap"><code>getLedgerEntries</code> with an account key</td><td>public</td></tr>
+<tr><td><code>GetAssets</code></td><td class="wrap"><code>getLedgerEntries</code> with a trustline key</td><td>public</td></tr>
+<tr><td><code>CreateAccount</code></td><td class="wrap">Friendbot HTTP GET, not JSON-RPC</td><td>public</td></tr>
+</tbody>
+</table>
+</div>
+
+<h3 id="appendix-scval">SCVal conversions</h3>
+
+<div class="table-wrap">
+<table>
+<thead><tr><th>C#</th><th>SCVal</th><th>Rust</th></tr></thead>
+<tbody>
+<tr><td><code>uint</code></td><td><code>ScvU32</code></td><td><code>u32</code></td></tr>
+<tr><td><code>int</code></td><td><code>ScvI32</code></td><td><code>i32</code></td></tr>
+<tr><td><code>ulong</code></td><td><code>ScvU64</code></td><td><code>u64</code></td></tr>
+<tr><td><code>string</code></td><td><code>ScvString</code></td><td><code>String</code></td></tr>
+<tr><td><code>bool</code></td><td><code>ScvBool</code></td><td><code>bool</code></td></tr>
+<tr><td><code>byte[]</code></td><td><code>ScvBytes</code></td><td><code>Bytes</code></td></tr>
+<tr><td><code>enum</code></td><td><code>ScvU32</code></td><td><code>u32</code></td></tr>
+<tr><td><code>T[]</code></td><td><code>ScvVec</code></td><td><code>Vec&lt;T&gt;</code></td></tr>
+<tr><td><code>IDictionary</code></td><td><code>ScvMap</code></td><td><code>Map&lt;K, V&gt;</code></td></tr>
+<tr><td><code>struct</code></td><td class="wrap"><code>ScvMap</code> keyed by field name</td><td><code>#[contracttype]</code> struct</td></tr>
+<tr><td><code>Vector2Int</code></td><td class="wrap"><code>ScvMap</code>, keys <code>"x"</code> and <code>"y"</code></td><td>struct with <code>x</code>, <code>y</code></td></tr>
+<tr><td class="wrap"><code>AccountStringToScvAddress</code></td><td><code>ScvAddress</code></td><td><code>Address</code> (<code>G...</code>)</td></tr>
+<tr><td class="wrap"><code>ContractStringToScvAddress</code></td><td><code>ScvAddress</code></td><td><code>Address</code> (<code>C...</code>)</td></tr>
+</tbody>
+</table>
+</div>
+
+<h3 id="appendix-jslib">jslib functions and return codes</h3>
+
+<div class="table-wrap">
+<table>
+<thead><tr><th>Function</th><th>Code</th><th>Meaning</th></tr></thead>
+<tbody>
+<tr><td rowspan="5"><code>JSCheckWallet</code></td><td><code>1</code></td><td>Wallet available</td></tr>
+<tr><td><code>-1</code></td><td><code>window.freighterApi</code> missing</td></tr>
+<tr><td><code>-2</code></td><td><code>isConnected()</code> returned an error</td></tr>
+<tr><td><code>-3</code></td><td>Not connected</td></tr>
+<tr><td><code>-666</code></td><td>Unhandled JS exception</td></tr>
+
+<tr><td rowspan="4"><code>JSGetFreighterAddress</code></td><td><code>1</code></td><td><code>data</code> is the <code>G...</code> address</td></tr>
+<tr><td><code>-1</code></td><td class="wrap">Stellar JS SDK global missing, or <code>getNetwork()</code> errored</td></tr>
+<tr><td><code>-2</code></td><td>Freighter is on the wrong network</td></tr>
+<tr><td><code>-3</code></td><td><code>requestAccess()</code> errored</td></tr>
+
+<tr><td rowspan="2"><code>JSGetNetworkDetails</code></td><td><code>1</code></td><td><code>data</code> is network details JSON</td></tr>
+<tr><td><code>-1</code></td><td><code>getNetworkDetails()</code> errored</td></tr>
+
+<tr><td rowspan="4"><code>JSSignTransaction</code></td><td><code>1</code></td><td><code>data</code> is the signed envelope XDR</td></tr>
+<tr><td><code>-9</code></td><td>User rejected the request</td></tr>
+<tr><td><code>-1</code></td><td>Other signing error</td></tr>
+<tr><td><code>-666</code></td><td>Unhandled JS exception</td></tr>
+</tbody>
+</table>
+</div>
+
+<p>Outside a WebGL player build, <code>InvokeJs</code> returns <code>-1</code> with
+<code>"Wallet is only available in WebGL builds"</code> without calling into JavaScript.</p>
+
+<h3 id="appendix-sep50">SEP-50 helpers</h3>
+
+<div class="table-wrap">
+<table>
+<thead><tr><th>Helper</th><th>Returns</th></tr></thead>
+<tbody>
+<tr><td><code>InvokeSEP50AssetMint(context, ownerOverride, points, task)</code></td><td class="wrap"><code>Result&lt;SorobanInvocationMeta&gt;</code>. Points must be 50, 100 or 500.</td></tr>
+<tr><td><code>InvokeSEP50AssetTransfer(context, tokenId, destination, task)</code></td><td><code>Result&lt;bool&gt;</code></td></tr>
+<tr><td><code>SimSEP50AssetBalance(context, ownerOverride, task)</code></td><td><code>Result&lt;int&gt;</code></td></tr>
+<tr><td><code>SimSEP50AssetName(context, task)</code></td><td><code>Result&lt;string&gt;</code></td></tr>
+<tr><td><code>SimSEP50AssetSymbol(context, task)</code></td><td><code>Result&lt;string&gt;</code></td></tr>
+<tr><td><code>SimSEP50AssetOwner_Of(context, tokenId, task)</code></td><td><code>Result&lt;SCAddress&gt;</code></td></tr>
+<tr><td><code>SimSEP50AssetToken_Uri(context, tokenId, task)</code></td><td><code>Result&lt;string&gt;</code></td></tr>
+<tr><td><code>SimSEP50AssetPoints(context, tokenId, task)</code></td><td><code>Result&lt;int&gt;</code></td></tr>
+<tr><td><code>SimSEP50AssetTotal_Supply(context, task)</code></td><td><code>Result&lt;int&gt;</code></td></tr>
+<tr><td><code>SimSEP50AssetGetTokenId(context, index, task)</code></td><td><code>Result&lt;int&gt;</code></td></tr>
+<tr><td><code>ReqSEP50AssetOwnerMap(context, task)</code></td><td class="wrap"><code>Result&lt;Dictionary&lt;int, string&gt;&gt;</code>, token id to owner address</td></tr>
+</tbody>
+</table>
+</div>
+
+<h3 id="appendix-deployments">Deployments</h3>
+
+<p>Stellar testnet. From <code>Assets/Resources/DefaultSettings.asset</code>.</p>
+
+<div class="table-wrap">
+<table>
+<thead><tr><th>Item</th><th>Value</th></tr></thead>
+<tbody>
+<tr><td>Soroban RPC</td><td class="wrap"><code>https://soroban-testnet.stellar.org</code></td></tr>
+<tr><td>Friendbot</td><td class="wrap"><code>https://friendbot.stellar.org?addr={account}</code></td></tr>
+<tr><td class="wrap">Game contract<br><code>Contracts/unity-sample</code></td><td class="wrap"><code>CBKVSWWBEXYITIQC2NT7EHFKASBE36ILVWFHCAQ2E2TH772Q5U5Q3OZW</code></td></tr>
+<tr><td class="wrap">NFT contract<br><code>Contracts/nft</code></td><td class="wrap"><code>CD73SMYF7CD7UNJTDH7W3BRUQCJEFPZPZAKTZRINNGPFKEYS3EZOCL62</code></td></tr>
+<tr><td>Asset code</td><td><code>SCRY</code></td></tr>
+<tr><td>Testnet asset issuer</td><td class="wrap"><code>GDGV7NUANMLOJ5P2KF3COS7AZZVFEAYG2UNSKCQFJM7K7IC7VL2MIKHR</code></td></tr>
+<tr><td>Testnet passphrase</td><td class="wrap"><code>Test SDF Network ; September 2015</code></td></tr>
+<tr><td>Public passphrase</td><td class="wrap"><code>Public Global Stellar Network ; September 2015</code></td></tr>
+</tbody>
+</table>
+</div>
+
+<h3 id="appendix-errors">Common failures</h3>
+
+<div class="table-wrap">
+<table>
+<thead><tr><th>Symptom</th><th>Cause</th></tr></thead>
+<tbody>
+<tr><td class="wrap"><code>NullReferenceException</code> when signing</td><td class="wrap"><code>Network.Current</code> is null. Call <code>Network.UseTestNetwork()</code> or <code>UsePublicNetwork()</code>.</td></tr>
+<tr><td class="wrap"><code>WALLET_NOT_AVAILABLE</code> with the wallet connected</td><td class="wrap"><code>unityWalletSigner</code> is null. The delegate is <code>[NonSerialized]</code> and must be reassigned after every connect.</td></tr>
+<tr><td class="wrap">Connect fails, address code <code>-1</code></td><td class="wrap">No Stellar JS SDK global on the page. Add <code>stellar-sdk.js</code> to the WebGL template.</td></tr>
+<tr><td class="wrap">Connect fails, address code <code>-2</code></td><td class="wrap">Freighter's selected network does not match the <code>isTestnet</code> argument.</td></tr>
+<tr><td class="wrap">Wallet never found in the Editor</td><td class="wrap">Expected. The wallet path is gated on <code>!UNITY_EDITOR</code>. Test in a browser build.</td></tr>
+<tr><td class="wrap">Wallet never found from <code>file://</code></td><td class="wrap">Extensions do not inject into local files. Serve the build over http or https.</td></tr>
+<tr><td class="wrap">Works in Editor, malformed JSON in WebGL</td><td class="wrap">Managed stripping removed the RPC DTOs. Add <code>link.xml</code>.</td></tr>
+<tr><td class="wrap"><code>SIMULATION_FAILED</code> or <code>CONTRACT_ERROR</code></td><td class="wrap">The contract rejected the call. Read <code>sim.DiagnosticEvents</code> for the real reason.</td></tr>
+<tr><td class="wrap"><code>ENTRY_NOT_FOUND</code> from <code>ReqAccountEntry</code></td><td class="wrap">The account is unfunded or does not exist. Fund it via Friendbot.</td></tr>
+<tr><td class="wrap"><code>TRANSACTION_TIMEOUT</code></td><td class="wrap">Polling budget exhausted. Raise <code>maxAttempts</code>. The transaction may still have applied.</td></tr>
+<tr><td class="wrap">Decoded struct fields are all default</td><td class="wrap">C# field names do not match the Rust <code>#[contracttype]</code> field names.</td></tr>
+<tr><td class="wrap">Throw inside <code>StrKey</code> before any request</td><td class="wrap">An account address passed to <code>ContractStringToScvAddress</code>, or the reverse.</td></tr>
+<tr><td class="wrap">Contract calls hit the wrong contract</td><td class="wrap"><code>context.contractAddress</code> still points at the previous target. Copy the struct before retargeting.</td></tr>
+<tr><td class="wrap">Assembly fails to compile on import</td><td class="wrap">Missing DLLs in <code>Runtime/Plugins/</code>. See <a href="#ch2-install">Adding the packages</a>.</td></tr>
+</tbody>
+</table>
+</div>
+
+<h3 id="appendix-links">External references</h3>
+
+<ul>
+<li><a href="https://developers.stellar.org/docs/build/smart-contracts">Stellar smart contract documentation</a></li>
+<li><a href="https://developers.stellar.org/docs/data/apis/rpc">Soroban RPC method reference</a></li>
+<li><a href="https://github.com/OpenZeppelin/stellar-contracts">OpenZeppelin Stellar contracts</a></li>
+<li><a href="https://docs.freighter.app/">Freighter wallet documentation</a></li>
+<li><a href="https://stellar.expert/explorer/testnet">Stellar Expert, testnet explorer</a></li>
+</ul>
+
+<footer class="page-footer">
+<p>Written against <code>com.scryingstone.stellar-sdk</code> 0.1.0 and
+<code>com.scryingstone.stellar-wallet</code> 0.1.0. Contract addresses and RPC endpoints
+referenced throughout are Stellar <strong>testnet</strong>.</p>
+</footer>
+
+</main>
+</div>
+
+</body>
+</html>
