@@ -5,6 +5,7 @@ public class StreakPopup : MonoBehaviour
 {
     [SerializeField] TextMeshProUGUI streakText = null;
     [SerializeField] PunchEffect punchEffect = null;
+    CountingLabel streakLabel;
 
     void Awake()
     {
@@ -13,25 +14,25 @@ public class StreakPopup : MonoBehaviour
             punchEffect = GetComponent<PunchEffect>();
         }
 
-        RefreshStreakText(0, false);
+        streakLabel = CountingLabel.Bind(streakText, value => value.ToString() + "x");
+    }
+
+    void OnDisable()
+    {
+        streakLabel?.Kill();
     }
 
     public void SetStreak(int streak)
     {
-        RefreshStreakText(streak, true);
+        streakLabel?.Set(streak);
+        if (punchEffect != null)
+        {
+            punchEffect.Punch();
+        }
     }
 
     public void SetStreakImmediate(int streak)
     {
-        RefreshStreakText(streak, false);
-    }
-
-    void RefreshStreakText(int streak, bool playPunch)
-    {
-        streakText.text = streak.ToString() + "x";
-        if (playPunch && punchEffect != null)
-        {
-            punchEffect.Punch();
-        }
+        streakLabel?.SetImmediate(streak);
     }
 }

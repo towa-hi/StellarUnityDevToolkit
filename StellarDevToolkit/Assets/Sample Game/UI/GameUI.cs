@@ -8,6 +8,8 @@ public class GameUI : MonoBehaviour
     [SerializeField] GameOverPopup gameOverPopup = null;
     GameController gameController = null;
 
+    public Transform ScoreFlyTarget => totalScorePopup != null ? totalScorePopup.FlyTarget : null;
+
     public void Initialize(GameController controller)
     {
         UnsubscribeFromController();

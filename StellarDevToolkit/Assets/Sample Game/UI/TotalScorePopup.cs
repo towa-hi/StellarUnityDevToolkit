@@ -5,6 +5,9 @@ public class TotalScorePopup : MonoBehaviour
 {
     [SerializeField] TextMeshProUGUI totalScoreText = null;
     [SerializeField] PunchEffect punchEffect = null;
+    CountingLabel scoreLabel;
+
+    public Transform FlyTarget => totalScoreText != null ? totalScoreText.transform : transform;
 
     void Awake()
     {
@@ -13,25 +16,25 @@ public class TotalScorePopup : MonoBehaviour
             punchEffect = GetComponent<PunchEffect>();
         }
 
-        RefreshTotalScoreText(0, false);
+        scoreLabel = CountingLabel.Bind(totalScoreText);
+    }
+
+    void OnDisable()
+    {
+        scoreLabel?.Kill();
     }
 
     public void SetTotalScore(int totalScore)
     {
-        RefreshTotalScoreText(totalScore, true);
+        scoreLabel?.Set(totalScore);
+        if (punchEffect != null)
+        {
+            punchEffect.Punch();
+        }
     }
 
     public void SetTotalScoreImmediate(int totalScore)
     {
-        RefreshTotalScoreText(totalScore, false);
-    }
-
-    void RefreshTotalScoreText(int totalScore, bool playPunch)
-    {
-        totalScoreText.text = totalScore.ToString();
-        if (playPunch && punchEffect != null)
-        {
-            punchEffect.Punch();
-        }
+        scoreLabel?.SetImmediate(totalScore);
     }
 }

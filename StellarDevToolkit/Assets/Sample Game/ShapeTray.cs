@@ -24,6 +24,15 @@ public class ShapeTray : MonoBehaviour
     const float TileLocalZOffset = -0.5f;
     const float DragWorldZOffset = -1.0f;
     const int FootprintMask = (1 << ShapeDefinition.FootprintBitCount) - 1;
+    static readonly Color[] BrightPieceColors =
+    {
+        new Color32(255, 59, 48, 255),
+        new Color32(255, 149, 0, 255),
+        new Color32(255, 204, 0, 255),
+        new Color32(52, 199, 89, 255),
+        new Color32(10, 132, 255, 255),
+        new Color32(175, 82, 222, 255)
+    };
     readonly Dictionary<Vector2Int, Tile> tilesByLocalCoord = new Dictionary<Vector2Int, Tile>();
     readonly List<Renderer> cachedRenderers = new List<Renderer>();
     readonly Dictionary<Renderer, Color> rendererBaseColors = new Dictionary<Renderer, Color>();
@@ -31,6 +40,7 @@ public class ShapeTray : MonoBehaviour
     Vector3 fullScale = Vector3.one;
     Tween slotPoseTween = null;
     bool ownsDefinition = false;
+    Color pieceColor = Color.white;
 
     void Awake()
     {
@@ -38,6 +48,7 @@ public class ShapeTray : MonoBehaviour
         BuildTilesFromDefinition();
         RebuildTileDictionaryFromChildren();
         CacheRenderers();
+        SetAlpha(idleAlpha);
     }
 
     void OnValidate()
@@ -68,6 +79,7 @@ public class ShapeTray : MonoBehaviour
         BuildTilesFromDefinition();
         RebuildTileDictionaryFromChildren();
         CacheRenderers();
+        SetAlpha(idleAlpha);
     }
 
     public void SnapToSlotPose()
@@ -205,6 +217,7 @@ public class ShapeTray : MonoBehaviour
         }
 
         ClearExistingTiles();
+        pieceColor = BrightPieceColors[Random.Range(0, BrightPieceColors.Length)];
         Dictionary<Vector2Int, TileData?> unpackedTilesByCoord = definition.UnpackToTileDictionary();
         float centerOffset = GameUtility.GetShapeGridCenterOffset();
         foreach (KeyValuePair<Vector2Int, TileData?> entry in unpackedTilesByCoord)
@@ -279,8 +292,7 @@ public class ShapeTray : MonoBehaviour
             if (renderer != null)
             {
                 cachedRenderers.Add(renderer);
-                Material sharedMaterial = renderer.sharedMaterial;
-                rendererBaseColors[renderer] = sharedMaterial != null ? sharedMaterial.color : Color.white;
+                rendererBaseColors[renderer] = pieceColor;
             }
         }
     }

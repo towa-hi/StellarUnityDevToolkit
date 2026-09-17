@@ -10,16 +10,21 @@ public class BoardCell : MonoBehaviour
     [SerializeField] GameObject background = null;
     [SerializeField] MeshCollider hitbox = null;
     [SerializeField] Color idleBackgroundColor = Color.white;
+    [SerializeField] Color alternateBackgroundColor = new Color(0.55f, 0.55f, 0.55f);
     [SerializeField] Color hoverBackgroundColor = Color.red;
 
     Renderer backgroundRenderer = null;
     MaterialPropertyBlock backgroundPropertyBlock = null;
     bool isPreviewHighlighted;
 
+    Color CheckerBackgroundColor => ((Coord.x + Coord.y) & 1) == 0
+        ? idleBackgroundColor
+        : alternateBackgroundColor;
+
     void Awake()
     {
         CacheBackgroundRenderer();
-        ApplyBackgroundColor(idleBackgroundColor);
+        ApplyBackgroundColor(CheckerBackgroundColor);
     }
 
     void OnValidate()
@@ -27,7 +32,7 @@ public class BoardCell : MonoBehaviour
         CacheBackgroundRenderer();
         if (!isPreviewHighlighted)
         {
-            ApplyBackgroundColor(idleBackgroundColor);
+            ApplyBackgroundColor(CheckerBackgroundColor);
         }
     }
 
@@ -37,7 +42,7 @@ public class BoardCell : MonoBehaviour
         IsOccupied = false;
         isPreviewHighlighted = false;
         tile = null;
-        ApplyBackgroundColor(idleBackgroundColor);
+        ApplyBackgroundColor(CheckerBackgroundColor);
     }
 
     public void SetOccupiedState(bool occupied, Tile occupiedTile = null)
@@ -49,7 +54,7 @@ public class BoardCell : MonoBehaviour
     public void SetPreviewHighlight(bool highlighted)
     {
         isPreviewHighlighted = highlighted;
-        ApplyBackgroundColor(highlighted ? hoverBackgroundColor : idleBackgroundColor);
+        ApplyBackgroundColor(highlighted ? hoverBackgroundColor : CheckerBackgroundColor);
     }
 
     public MeshCollider GetHitbox()

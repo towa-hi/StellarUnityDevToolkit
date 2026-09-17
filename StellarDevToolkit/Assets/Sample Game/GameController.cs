@@ -301,6 +301,7 @@ public class GameController : MonoBehaviour
         }
 
         ClearDragState();
+        ShrinkEffect.DestroyActiveFlights();
         if (board != null)
         {
             board.Clear();
@@ -971,6 +972,9 @@ public class GameController : MonoBehaviour
             return;
         }
 
+        Transform scoreFlyTarget = gameUI != null ? gameUI.ScoreFlyTarget : null;
+        int flightIndex = 0;
+        const float flightStagger = 0.03f;
         foreach (Vector2Int coord in cellsToClear)
         {
             if (!board.TryGetCell(coord, out BoardCell boardCell))
@@ -985,7 +989,8 @@ public class GameController : MonoBehaviour
                 ShrinkEffect shrinkEffect = occupiedTile.GetComponent<ShrinkEffect>();
                 if (shrinkEffect != null)
                 {
-                    shrinkEffect.Play();
+                    shrinkEffect.Play(scoreFlyTarget, flightIndex * flightStagger);
+                    flightIndex++;
                 }
                 else
                 {

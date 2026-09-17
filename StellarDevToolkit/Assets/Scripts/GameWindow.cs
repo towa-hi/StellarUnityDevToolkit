@@ -14,6 +14,9 @@ public class GameWindow : MonoBehaviour
     public RewardPopup rewardPopup;
 
     GameController gameController;
+    CountingLabel piecesPlacedLabel;
+    CountingLabel pointsLabel;
+    CountingLabel streakLabel;
 
     void OnEnable()
     {
@@ -23,6 +26,7 @@ public class GameWindow : MonoBehaviour
             quitButton.onClick.AddListener(OnQuitClicked);
         }
 
+        EnsureCountingLabels();
         BindToController();
         HidePopups();
         RefreshDisplay();
@@ -37,6 +41,7 @@ public class GameWindow : MonoBehaviour
 
         HidePopups();
         UnsubscribeFromController();
+        KillCountingLabels();
     }
 
     void BindToController()
@@ -101,7 +106,7 @@ public class GameWindow : MonoBehaviour
 
     void HandleStatsChanged(int piecesPlaced, int score, int streak)
     {
-        SetDisplay(piecesPlaced, score, streak);
+        SetDisplay(piecesPlaced, score, streak, immediate: false);
     }
 
     void HandleGameOver()
@@ -169,29 +174,52 @@ public class GameWindow : MonoBehaviour
     {
         if (gameController == null)
         {
-            SetDisplay(0, 0, 0);
+            SetDisplay(0, 0, 0, immediate: true);
             return;
         }
 
-        SetDisplay(gameController.PiecesPlaced, gameController.Score, gameController.CurrentStreak);
+        SetDisplay(gameController.PiecesPlaced, gameController.Score, gameController.CurrentStreak, immediate: true);
     }
 
-    void SetDisplay(int piecesPlaced, int score, int streak)
+    void SetDisplay(int piecesPlaced, int score, int streak, bool immediate)
     {
-        if (piecesPlacedText != null)
+        EnsureCountingLabels();
+        if (immediate)
         {
-            piecesPlacedText.text = piecesPlaced.ToString();
+            piecesPlacedLabel?.SetImmediate(piecesPlaced);
+            pointsLabel?.SetImmediate(score);
+            streakLabel?.SetImmediate(streak);
+            return;
         }
 
-        if (pointsText != null)
+        piecesPlacedLabel?.Set(piecesPlaced);
+        pointsLabel?.Set(score);
+        streakLabel?.Set(streak);
+    }
+
+    void EnsureCountingLabels()
+    {
+        if (piecesPlacedLabel == null && piecesPlacedText != null)
         {
-            pointsText.text = score.ToString();
+            piecesPlacedLabel = CountingLabel.Bind(piecesPlacedText);
         }
 
-        if (streakText != null)
+        if (pointsLabel == null && pointsText != null)
         {
-            streakText.text = streak.ToString();
+            pointsLabel = CountingLabel.Bind(pointsText);
         }
+
+        if (streakLabel == null && streakText != null)
+        {
+            streakLabel = CountingLabel.Bind(streakText);
+        }
+    }
+
+    void KillCountingLabels()
+    {
+        piecesPlacedLabel?.Kill();
+        pointsLabel?.Kill();
+        streakLabel?.Kill();
     }
 
     void OnQuitClicked()
